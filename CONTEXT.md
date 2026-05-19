@@ -2,91 +2,147 @@
 
 ## Estado Actual
 **Data:** 2026-05-19
-**Sessão:** #4
-**Feature em progresso:** V0.3 concluído — Web Search + Autonomous Learner + UI improvements
+**Sessão:** #5
+**Feature em progresso:** V0.4 Fase 1 concluída — Mente Distribuída (base de grafos + research)
 
 ---
 
-## O que foi feito nesta sessão (V0.3)
+## O que foi feito nesta sessão
 
-### Web Search com Tool Use
-- [x] `backend/tools/web_search.py` — chama Tavily API (timeout 5s, fallback gracioso)
-- [x] `backend/main.py` — agentic loop no `/api/chat`: 1ª chamada non-streaming detecta tool_calls, executa search, 2ª chamada streaming sintetiza com resultados
-- [x] `frontend/src/components/ChatView.jsx` — indicador "A pesquisar: ..." quando `{"searching": true}` chega via SSE
-- [x] API key Tavily em `~/.personal-ai/.env` como `TAVILY_API_KEY`
+### Multi-modelo com LM Studio
+- [x] `MODELS` dict com 8 modelos: nemo-12b, qwen-40b, qwen-9b-auto, gemma-lite, qwen-27b, gemma-26b, gpt-20b, qwen-9b
+- [x] IDs exactos verificados via `/api/v0/models` do LM Studio
+- [x] `ModelSelector.jsx` — dropdown custom com bolinha verde por modelo (polling `/api/lm-models` cada 10s)
+- [x] `/api/lm-models` usa `/api/v0/models` (com campo `state: "loaded"`) em vez de `/v1/models` (que lista tudo)
+- [x] Auto-select do modelo carregado ao carregar a página
+- [x] `FAST_MODELS` → `REASONING_MODELS` com `enable_thinking: false` por defeito para modelos Qwen
 
-**Bug crítico resolvido:** `TAVILY_API_KEY = os.getenv(...)` era lido na importação do módulo, antes de `load_dotenv()` em `main.py`. Corrigido: key lida lazily dentro da função.
+### ThinkingSelector — controlo de reasoning
+- [x] `ThinkingSelector.jsx` — só aparece para modelos Qwen (arch qwen35)
+- [x] Modos: Off / Fast (512 tokens) / Med (2048) / Max (8192)
+- [x] Backend: `thinking_mode` no `ChatRequest`, `_extra_params(model_key, thinking_mode)` → `enable_thinking` + `thinking_budget`
 
-**Bug de persona:** instrução "REGRA: chama web_search IMEDIATAMENTE" adicionada ao system prompt — sem ela o modelo com o persona completo pedia permissão antes de pesquisar.
+### Fix: modelos carregando Gemma indevidamente
+- [x] `services/learner.py` — estava hardcoded em `LM_STUDIO_MODEL_LITE`. Agora chama `/api/v0/models` e usa o primeiro modelo com `state: "loaded"`
+- [x] `memory_extractor.py` — já usava o `model_id` passado (corrigido numa sessão anterior)
+- [x] `_stream_and_collect` — passa `model_id` do chat actual para `extract_and_store` (não o model_lite)
 
-### Autonomous Learner
-- [x] `backend/services/learner.py` — ciclo autónomo: escolhe interesse aleatório → Tavily → Gemma extrai 2-3 insights → guarda em LanceDB com `source: "self|{interest}"`
-- [x] Arranque como asyncio task no startup do FastAPI (espera 2 min, depois corre de 30 em 30 min)
-- [x] `force_learn(interest)` — força ciclo para interesse específico (usado para popular dados iniciais)
-- [x] `backend/persona/identity.json` — campo `interests`: filosofia, história, futuro da IA, comunismo, capitalismo
+### Histórico de sessões (estilo ChatGPT)
+- [x] `sqlite_service.py` — tabela `sessions` (id, title, created_at, updated_at) + `session_id` em `conversations`
+- [x] `SessionSidebar.jsx` — painel esquerdo com sessões agrupadas por Hoje/Ontem/7 dias/Anterior, botão `+`, delete on hover
+- [x] Auto-título a partir da primeira mensagem (60 chars)
+- [x] `GET /api/sessions`, `GET /api/sessions/{id}/messages`, `DELETE /api/sessions/{id}`, `PATCH /api/sessions/{id}`
+- [x] `_chat_generator` emite `{session_id, session_title}` como primeiro evento SSE
+- [x] Bug fix crítico: `sessionCreatedHere` ref — impede fetch de mensagens durante streaming ativo (causava crash `undefined.content`)
 
-### Sistema de memória própria
-- [x] Memórias da Lucy têm `source: "self|{interest}"` (vs `"conversation"` para memórias do utilizador)
-- [x] `get_system_prompt` separa as duas em secções: "O que sabes sobre o utilizador" vs "O que aprendeste por conta própria"
-- [x] `GET /api/interests` — devolve factos agrupados e ordenados por interesse
-- [x] Filtros actualizados: `source.startswith("self")` em vez de `== "self"`
+### Bugs de UI corrigidos
+- [x] **Página preta ao clicar Nova Conversa** — React confundia `SessionSidebar` e `ChatView` com `key={0}` idêntico → corrigido para `key="sidebar-N"` e `key="chat-N"`
+- [x] **Espaço extra nas mensagens** — `whiteSpace: pre-wrap` + LLM começa com `\n` → `message.content?.trim()` (só quando não está em streaming)
+- [x] **Resposta duplicada** — ChatView remontava quando `setSessionId` mudava a key → key do ChatView agora só usa `chatKey` (não inclui `sessionId`)
+- [x] **Contexto de pesquisa a contaminar conversas** — entity matching agora usa word boundary (`\b`) e só para nós `type === 'domain'`
 
-### UI — InterestsView
-- [x] `frontend/src/components/InterestsView.jsx` — painel 📚 com interesses em cores próprias, factos com timestamp relativo, actualiza de 30 em 30s
-- [x] Toggle 🖼️ no header para esconder/mostrar personagem (chat expande para 100%)
-- [x] Toggle 📚 para abrir/fechar painel de aprendizagem
+### V0.4 Fase 1 — Mente Distribuída
 
-### Persona — comportamento conversacional
-- [x] Corrigido: Lucy terminava TODAS as respostas com uma pergunta
-- [x] Corrigido: voltava a assuntos anteriores (PC/benchmark) mesmo quando o tema tinha mudado
-- [x] Regras novas no system prompt: perguntas são opcionais e genuínas; deixa a conversa respirar; não redireciona para assuntos velhos
+#### Backend: Knowledge Graph Service
+- [x] `backend/knowledge/graph_service.py`
+  - Grafo SQLite em `~/.personal-ai/knowledge_graph.db` (nodes + edges)
+  - Hierarquia 3 níveis por domínio: `essence.txt` (~20 tokens), `summary.md` (~200 tokens), `full.md` (ilimitado)
+  - Domínios em `backend/knowledge/domains/{nome}/`
+  - `traverse(start_ids, hops=2)` — BFS para retrieval
+  - `get_knowledge_context(domains, level)` — agrega contexto para system prompt
+- [x] `init_graph()` chamado no startup do FastAPI
+
+#### Backend: Research Service
+- [x] `backend/knowledge/research_service.py`
+  - `run_search(topic, emit)` — pesquisa rápida, escreve summary + essence, adiciona nós ao grafo
+  - `run_research(topic, emit, user_inputs)` — análise profunda multi-step com stream de consciência, aceita respostas do utilizador via `asyncio.Queue`
+  - Ambos usam `_get_loaded_model()` dinamicamente
+  - `topic_display` preserva grafia original (não traduz "amoeba" para "ameba")
+  - Instrução explícita ao LLM para não alterar o termo pesquisado
+
+#### Backend: Endpoints
+- [x] `POST /api/search` — SSE streaming de `/search <tema>`
+- [x] `POST /api/research` — SSE streaming de `/research <tema>` com queue de respostas
+- [x] `POST /api/research/reply` — envia resposta do utilizador durante research em curso
+- [x] `GET /api/knowledge/graph` — todos os nós e arestas
+- [x] `GET /api/knowledge/domains` — lista de domínios
+- [x] `GET /api/knowledge/summary/{domain}` — summary ou essence do domínio
+
+#### Backend: Retrieval integrado no chat
+- [x] `_extract_entity_ids(message)` — word boundary matching, só domínios
+- [x] `traverse()` + `get_knowledge_context()` injectados no system prompt quando relevante
+- [x] Zero vectors para conhecimento do mundo — só grafo + ficheiros
+
+#### Frontend: ResearchStream
+- [x] `ResearchStream.jsx` — painel paralelo ao chat, aparece durante `/search` ou `/research`
+- [x] Barra de progresso animada (`@keyframes progress-slide`)
+- [x] Pensamentos da Lucy em tempo real (step `thought`)
+- [x] Input para responder durante research + botão "ignorar"
+- [x] Quando termina: `"Terminei a pesquisa. Quer ouvir o que achei sobre **X**?"`
+- [x] Detecta `/search <tema>` e `/research <tema>` no `ChatView` antes de enviar para API
+
+#### Frontend: KnowledgeGraph
+- [x] `KnowledgeGraph.jsx` — painel "Mente da Lucy" com `react-force-graph-2d`
+- [x] Nós azuis (domínios, maiores) e roxos (conceitos, menores)
+- [x] Arestas com setas e label da relação
+- [x] Auto-zoom após simulação estabilizar
+- [x] Click num nó → mostra summary no painel de baixo
+- [x] Estado vazio com mensagem orientativa
+- [x] Botão no header (ícone de rede)
+
+### UI / Design
+- [x] `showCharacter` começa `false` (foto desativada por defeito)
+- [x] Logo Lucy: SVG de olho + fonte Orbitron + gradiente cyan
+- [x] Accent color alterado para `#00d4ff` (cyan)
+- [x] `HeaderIconButton` component reutilizável
+- [x] `@keyframes spin` e `@keyframes progress-slide` em `index.css`
 
 ---
 
-## Decisões tomadas
-
-| Decisão | Motivo | Alternativa rejeitada |
-|---|---|---|
-| Tavily em vez de Brave Search | Free tier melhor (1000/mês), API simples, snippets formatados para LLMs | Brave Search (2000/mês mas key mais burocrática) |
-| Non-streaming 1ª chamada + streaming 2ª | Simplicidade — não precisar de parsear tool_calls de um stream | Streaming completo com reset |
-| `source: "self\|interesse"` em vez de campo novo | Sem quebrar schema LanceDB existente | Novo campo `topic` (requeria migração) |
-| asyncio.create_task para learner | Sem dependência de APScheduler | APScheduler |
-| Key lida lazily em web_search.py | `os.getenv()` na importação é lido antes de `load_dotenv()` — bug subtil | Module-level constant |
-| `temperature: 0` na chamada de tool detection | Determinismo — modelo ativava tools ~50% das vezes com temperatura default | Tool_choice: required (forçaria search sempre) |
-
----
-
-## Estrutura actual de ficheiros
+## Arquitectura actual
 
 ```
 ~/Projects/lucy/
 ├── backend/
-│   ├── main.py                  ← FastAPI + agentic loop + /api/interests
-│   ├── requirements.txt
-│   ├── persona/
-│   │   └── identity.json        ← system prompts + campo interests[]
+│   ├── main.py                     ← FastAPI, todos os endpoints, _chat_generator com SSE
+│   ├── knowledge/
+│   │   ├── __init__.py
+│   │   ├── graph_service.py        ← SQLite graph + hierarquia 3 níveis
+│   │   ├── research_service.py     ← run_search(), run_research()
+│   │   └── domains/                ← ficheiros de conhecimento (não versionado)
+│   │       └── {dominio}/
+│   │           ├── essence.txt
+│   │           ├── summary.md
+│   │           └── full.md
 │   ├── memory/
-│   │   ├── lancedb_service.py   ← embeddings (source: "conversation" | "self|{interest}")
-│   │   ├── sqlite_service.py    ← log estruturado
-│   │   └── memory_extractor.py  ← extrai factos do utilizador após cada turno
-│   ├── tools/
-│   │   └── web_search.py        ← Tavily API, key lida lazily, timeout 5s
-│   └── services/
-│       └── learner.py           ← learn_cycle(), force_learn(), start_learner()
+│   │   ├── lancedb_service.py      ← embeddings memórias do utilizador
+│   │   ├── sqlite_service.py       ← sessions + conversations + facts
+│   │   └── memory_extractor.py     ← extrai factos após cada turno
+│   ├── persona/
+│   │   └── identity.json           ← system prompts + interests[]
+│   ├── services/
+│   │   └── learner.py              ← learner autónomo (usa modelo loaded dinamicamente)
+│   └── tools/
+│       └── web_search.py           ← Tavily API
 ├── frontend/
-│   ├── src/
-│   │   ├── App.jsx              ← toggles: 🖼️ personagem, 📚 interesses, 🧠 memórias
-│   │   └── components/
-│   │       ├── ChatView.jsx     ← indicador "A pesquisar..."
-│   │       ├── InterestsView.jsx ← painel de aprendizagem autónoma
-│   │       ├── MemoryBrowserView.jsx
-│   │       ├── CharacterView.jsx
-│   │       └── [outros]
-│   └── public/animations/
+│   └── src/
+│       ├── App.jsx                 ← estado global, layout, toggles
+│       └── components/
+│           ├── ChatView.jsx        ← chat + /search /research commands
+│           ├── SessionSidebar.jsx  ← histórico de conversas
+│           ├── ModelSelector.jsx   ← dropdown com bolinhas loaded
+│           ├── ThinkingSelector.jsx ← Off/Fast/Med/Max (só Qwen)
+│           ├── ResearchStream.jsx  ← canal paralelo de research
+│           ├── KnowledgeGraph.jsx  ← grafo force-directed
+│           ├── MemoryBrowserView.jsx
+│           ├── InterestsView.jsx
+│           └── CharacterView.jsx
 
-~/.personal-ai/.env              ← ANTHROPIC_API_KEY, TAVILY_API_KEY, LM_STUDIO_URL, ...
-~/.personal-ai/lancedb/          ← embeddings locais (não versionado)
-~/.personal-ai/memory.db         ← SQLite (não versionado)
+~/.personal-ai/
+├── .env                            ← TAVILY_API_KEY, LM_STUDIO_URL, RESEMBLE_TOKEN, ...
+├── memory.db                       ← SQLite: sessions + conversations + facts
+├── knowledge_graph.db              ← SQLite: graph nodes + edges
+└── lancedb/                        ← embeddings do utilizador
 ```
 
 ---
@@ -94,61 +150,61 @@
 ## Comandos para arrancar
 
 ```bash
-# Backend (Python 3.10 framework)
+# Backend
 cd ~/Projects/lucy/backend
-/Library/Frameworks/Python.framework/Versions/3.10/bin/uvicorn main:app --port 8000
+uvicorn main:app --port 8000
 
 # Frontend
 cd ~/Projects/lucy/frontend
 npm run dev
-# Abre http://localhost:5173
+# http://localhost:5173
 
-# Forçar ciclo de aprendizagem manualmente
-cd ~/Projects/lucy/backend
-python3 -c "
-import asyncio, os
-from dotenv import load_dotenv
-load_dotenv(os.path.expanduser('~/.personal-ai/.env'))
-from services.learner import force_learn
-asyncio.run(force_learn('filosofia'))
-"
+# Ver modelos carregados no LM Studio
+curl -s http://localhost:1234/api/v0/models | python3 -m json.tool
+
+# Ver grafo de conhecimento
+curl -s http://localhost:8000/api/knowledge/graph | python3 -m json.tool
 ```
 
 ---
 
 ## Contexto crítico para não perder
 
-- **LM Studio** deve estar aberto com `gemma-4-e4b-it-ultra-uncensored-heretic` carregado
-- **Tavily** free tier: 1000 queries/mês — key em `~/.personal-ai/.env` como `TAVILY_API_KEY`
-- **Tool detection:** `temperature: 0` + instrução explícita no system prompt são ambos necessários para o modelo ativar tools de forma consistente
-- **Learner source format:** `"self|{interest}"` — split em `|` para agrupar no `/api/interests`; factos antigos com `source: "self"` ficam em grupo "geral"
-- **Resemble token** em `~/.personal-ai/.env` — vozes Resemble: Vanessa `7a33e74f` (PT), restantes EN
-- **LanceDB** em `~/.personal-ai/lancedb/` — schema fixo, sem campo `topic`; usar source para rastrear origem
-- **Extracção de factos:** async task após cada resposta (não bloqueia streaming)
-- **Python correcto:** `/Library/Frameworks/Python.framework/Versions/3.10/bin/` tem todas as deps instaladas
+- **LM Studio**: usar `/api/v0/models` (não `/v1/models`) para `state: "loaded"` — é a única forma de saber o que está realmente em memória
+- **Reasoning models**: `enable_thinking: false` enviado automaticamente para modelos Qwen. Com thinking ligado, passar `thinking_budget` (512/2048/8192)
+- **Session crash pattern**: `sessionCreatedHere.current = true` antes de `onSessionCreated()` — impede o useEffect de fazer fetch durante streaming ativo
+- **Knowledge retrieval**: só injeta contexto quando o nome exacto do domínio aparece na mensagem (word boundary). Evita contaminação entre tópicos
+- **Learner**: chama `/api/v0/models` a cada ciclo para usar o modelo loaded — nunca hardcoded
+- **topic_display vs domain**: `domain = topic.lower()` para paths de ficheiros; `topic_display = topic.strip()` para prompts LLM (preserva grafia)
+- **Python path**: `/Library/Frameworks/Python.framework/Versions/3.10/bin/uvicorn`
+- **Resemble**: Vanessa `7a33e74f` (PT-BR), restantes EN
 
 ---
 
-## V0.3 concluído — Pendente V0.4
+## V0.4 Fase 1 concluída — Próximas fases
 
-- [x] Web search com Tavily (tool use nativo do Gemma)
-- [x] Learner autónomo com interesses configuráveis
-- [x] Painel de aprendizagem (InterestsView)
-- [x] Toggle personagem + painel de interesses
-- [x] Persona: Lucy para de terminar cada resposta com uma pergunta
+### Fase 2 (próxima sessão)
+- [ ] Learner autónomo com curiosidade dirigida por grafo (identifica lacunas)
+- [ ] Surfacing natural: "Andei a estudar X, queres ouvir?"
+- [ ] Canal SSE persistente para Lucy falar durante research em background real
+- [ ] Novo layout (Adriano vai implementar)
 
-### Pendente V0.4
+### Fase 3
+- [ ] Compressão autónoma de `full.md` quando fica grande demais
+- [ ] Cross-domain synthesis: Lucy conecta domínios sem pedido explícito
+- [ ] Visualização de grafo com search/filter e histórico de crescimento
+
+### Pendente de sessões anteriores
 - [ ] `IdentityPanelView.jsx` — edição da persona em tempo real
-- [ ] Interesses da Lucy evoluem com base nas conversas (adicionar/remover automaticamente)
-- [ ] Histórico de pesquisas (o que pesquisou, quando, resultado)
-- [ ] Notificação quando o learner termina um ciclo (toast na UI)
+- [ ] Interesses evoluem com base nas conversas
+- [ ] Notificação toast quando learner termina ciclo
 
 ---
 
 ## Compaction prompt sugerido
 ```
-/compact Preserva: decisões de arquitectura, estrutura de ficheiros actual,
-comandos para arrancar (incluindo Python path correcto), bugs críticos resolvidos
-(TAVILY_API_KEY lazy loading, tool instruction no system prompt),
-estado V0.3 concluído, pendentes V0.4. Resume: outputs de ferramentas e código.
+/compact Preserva: arquitectura V0.4 (knowledge graph + research service + 3-tier files),
+bugs críticos resolvidos (sessionCreatedHere ref, duplicate key, word boundary matching),
+IDs exactos dos modelos LM Studio, comandos de arranque, contexto crítico.
+Resume: outputs de ferramentas e código intermédio.
 ```

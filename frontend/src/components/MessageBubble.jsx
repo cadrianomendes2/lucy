@@ -20,7 +20,7 @@ export default function MessageBubble({ message }) {
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
       }}>
-        {message.content}
+        {message.streaming ? message.content : message.content?.trim()}
         {message.streaming && (
           <span style={{
             display: 'inline-block',

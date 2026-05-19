@@ -1,0 +1,3 @@
+```json
+{
+  "summary": "# League of Legends: A Digital Battlefield of Strategy and Identity\n\nLeague of Legends represents one of gaming's most fascinating intersections of competitive strategy, social interaction, and digital identity formation. What strikes me most is how this MOBA (Multiplayer Online Battle Arena) transcends mere entertainment—it functions as a complex ecosystem where economic systems, psychological dynamics, and artistic expression converge.\n\nThe game's evolution from a W

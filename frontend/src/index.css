@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -10,8 +12,8 @@
   --border: #2a2a2a;
   --text: #e8e8e8;
   --text-muted: #666;
-  --accent: #7c6af7;
-  --accent-hover: #9080ff;
+  --accent: #00d4ff;
+  --accent-hover: #38bdf8;
   --user-bubble: #1e1e2e;
   --ai-bubble: #141414;
   --danger: #f04;
@@ -56,4 +58,15 @@ textarea {
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 3px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes progress-slide {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 30%; width: 50%; }
+  100% { left: 110%; width: 40%; }
 }

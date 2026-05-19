@@ -10,8 +10,20 @@ from tools.web_search import web_search
 
 PERSONA_PATH = os.path.join(os.path.dirname(__file__), "..", "persona", "identity.json")
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234")
-LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL_LITE", "gemma-4-e4b-it-ultra-uncensored-heretic")
 LEARN_INTERVAL = int(os.getenv("LEARN_INTERVAL_SECONDS", "1800"))  # 30 min por defeito
+
+
+async def _get_loaded_model() -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{LM_STUDIO_URL}/api/v0/models")
+            r.raise_for_status()
+            for m in r.json().get("data", []):
+                if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm"):
+                    return m["id"]
+    except Exception:
+        pass
+    return None
 
 _EXTRACT_PROMPT = """\
 Acabaste de ler estes resultados sobre o tópico "{interest}":
@@ -25,8 +37,11 @@ Sem explicações. Sem texto fora do JSON."""
 
 async def _extract_insights(interest: str, results: list[dict]) -> list[str]:
     context = "\n".join(f"[{r['title']}] {r['snippet']}" for r in results)
+    model = await _get_loaded_model()
+    if not model:
+        return []
     payload = {
-        "model": LM_STUDIO_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": _EXTRACT_PROMPT.format(interest=interest, context=context)}],
         "stream": False,
         "max_tokens": 300,
