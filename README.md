@@ -1,1 +1,3 @@
-# lucy
+# Lucy
+
+Personal AI project.
