@@ -2,25 +2,44 @@
 
 ## Estado Actual
 **Data:** 2026-05-19
-**Sessão:** #3
-**Feature em progresso:** V0.2 concluído — código consolidado em ~/Projects/lucy/ e no GitHub
+**Sessão:** #4
+**Feature em progresso:** V0.3 concluído — Web Search + Autonomous Learner + UI improvements
 
 ---
 
-## O que foi feito nesta sessão (V0.1 completo)
+## O que foi feito nesta sessão (V0.3)
 
-- [x] Estrutura de projecto criada em `~/Developer/personal-ai/`
-- [x] Backend FastAPI com streaming para Haiku + LM Studio (`main.py`)
-- [x] Frontend React + Vite com chat em streaming
-- [x] Modelo configurado: `gemma-4-e4b-it-ultra-uncensored-heretic` via LM Studio
-- [x] Persona da Lucy criada em `backend/persona/identity.json` (PT-BR e EN)
-- [x] Selector de idioma com bandeiras 🇧🇷 / 🇬🇧 — muda idioma e reinicia conversa
-- [x] TTS via Resemble AI — endpoint `/api/tts` no backend
-- [x] Selector de vozes com dropdown (Primrose, Bentley, Linda, Laura, Vanessa, Samantha)
-- [x] Emojis removidos do texto antes de enviar para TTS
-- [x] Personagem 3D dividida com o chat (40% / 60%)
-- [x] Animações WebP: `idle.webp` (padrão), `talking.webp` (durante TTS), `pleaseme.webp` (comando `/pleaseme`)
-- [x] Comando `/pleaseme` — activa animação por 4 segundos sem chamar a API
+### Web Search com Tool Use
+- [x] `backend/tools/web_search.py` — chama Tavily API (timeout 5s, fallback gracioso)
+- [x] `backend/main.py` — agentic loop no `/api/chat`: 1ª chamada non-streaming detecta tool_calls, executa search, 2ª chamada streaming sintetiza com resultados
+- [x] `frontend/src/components/ChatView.jsx` — indicador "A pesquisar: ..." quando `{"searching": true}` chega via SSE
+- [x] API key Tavily em `~/.personal-ai/.env` como `TAVILY_API_KEY`
+
+**Bug crítico resolvido:** `TAVILY_API_KEY = os.getenv(...)` era lido na importação do módulo, antes de `load_dotenv()` em `main.py`. Corrigido: key lida lazily dentro da função.
+
+**Bug de persona:** instrução "REGRA: chama web_search IMEDIATAMENTE" adicionada ao system prompt — sem ela o modelo com o persona completo pedia permissão antes de pesquisar.
+
+### Autonomous Learner
+- [x] `backend/services/learner.py` — ciclo autónomo: escolhe interesse aleatório → Tavily → Gemma extrai 2-3 insights → guarda em LanceDB com `source: "self|{interest}"`
+- [x] Arranque como asyncio task no startup do FastAPI (espera 2 min, depois corre de 30 em 30 min)
+- [x] `force_learn(interest)` — força ciclo para interesse específico (usado para popular dados iniciais)
+- [x] `backend/persona/identity.json` — campo `interests`: filosofia, história, futuro da IA, comunismo, capitalismo
+
+### Sistema de memória própria
+- [x] Memórias da Lucy têm `source: "self|{interest}"` (vs `"conversation"` para memórias do utilizador)
+- [x] `get_system_prompt` separa as duas em secções: "O que sabes sobre o utilizador" vs "O que aprendeste por conta própria"
+- [x] `GET /api/interests` — devolve factos agrupados e ordenados por interesse
+- [x] Filtros actualizados: `source.startswith("self")` em vez de `== "self"`
+
+### UI — InterestsView
+- [x] `frontend/src/components/InterestsView.jsx` — painel 📚 com interesses em cores próprias, factos com timestamp relativo, actualiza de 30 em 30s
+- [x] Toggle 🖼️ no header para esconder/mostrar personagem (chat expande para 100%)
+- [x] Toggle 📚 para abrir/fechar painel de aprendizagem
+
+### Persona — comportamento conversacional
+- [x] Corrigido: Lucy terminava TODAS as respostas com uma pergunta
+- [x] Corrigido: voltava a assuntos anteriores (PC/benchmark) mesmo quando o tema tinha mudado
+- [x] Regras novas no system prompt: perguntas são opcionais e genuínas; deixa a conversa respirar; não redireciona para assuntos velhos
 
 ---
 
@@ -28,51 +47,46 @@
 
 | Decisão | Motivo | Alternativa rejeitada |
 |---|---|---|
-| React + Vite em vez de SwiftUI | Velocidade de desenvolvimento, fácil troca futura | SwiftUI |
-| LM Studio em vez de Ollama | Utilizador já tem modelos configurados no LM Studio | Ollama |
-| `gemma-4-e4b-it-ultra-uncensored-heretic` | Modelo abliterado, sem filtros, leve (~5GB) | Gemma 31B |
-| Resemble AI para TTS | Já usado no npc-gen, vozes conhecidas | ElevenLabs / local |
-| voiceUuid directo no TTS | Mais flexível que language-based | Switch por idioma |
-| Persona em JSON separado | Antecipa sistema de identidade do V0.2 | Hardcoded no backend |
+| Tavily em vez de Brave Search | Free tier melhor (1000/mês), API simples, snippets formatados para LLMs | Brave Search (2000/mês mas key mais burocrática) |
+| Non-streaming 1ª chamada + streaming 2ª | Simplicidade — não precisar de parsear tool_calls de um stream | Streaming completo com reset |
+| `source: "self\|interesse"` em vez de campo novo | Sem quebrar schema LanceDB existente | Novo campo `topic` (requeria migração) |
+| asyncio.create_task para learner | Sem dependência de APScheduler | APScheduler |
+| Key lida lazily em web_search.py | `os.getenv()` na importação é lido antes de `load_dotenv()` — bug subtil | Module-level constant |
+| `temperature: 0` na chamada de tool detection | Determinismo — modelo ativava tools ~50% das vezes com temperatura default | Tool_choice: required (forçaria search sempre) |
 
 ---
 
 ## Estrutura actual de ficheiros
 
 ```
-~/Projects/lucy/                 ← repositório git principal
+~/Projects/lucy/
 ├── backend/
-│   ├── main.py                  ← FastAPI: /api/chat, /api/tts, /api/voices, /api/health, /api/memories
+│   ├── main.py                  ← FastAPI + agentic loop + /api/interests
 │   ├── requirements.txt
 │   ├── persona/
-│   │   └── identity.json        ← system prompts PT-BR e EN da Lucy
-│   └── memory/
-│       ├── lancedb_service.py   ← embeddings (all-MiniLM-L6-v2, LanceDB)
-│       ├── sqlite_service.py    ← log estruturado de conversas e factos
-│       └── memory_extractor.py  ← extrai factos via Gemma após cada turno
+│   │   └── identity.json        ← system prompts + campo interests[]
+│   ├── memory/
+│   │   ├── lancedb_service.py   ← embeddings (source: "conversation" | "self|{interest}")
+│   │   ├── sqlite_service.py    ← log estruturado
+│   │   └── memory_extractor.py  ← extrai factos do utilizador após cada turno
+│   ├── tools/
+│   │   └── web_search.py        ← Tavily API, key lida lazily, timeout 5s
+│   └── services/
+│       └── learner.py           ← learn_cycle(), force_learn(), start_learner()
 ├── frontend/
-│   ├── vite.config.js           ← proxy /api → localhost:8000
 │   ├── src/
-│   │   ├── App.jsx              ← layout, estado global
+│   │   ├── App.jsx              ← toggles: 🖼️ personagem, 📚 interesses, 🧠 memórias
 │   │   └── components/
-│   │       ├── ChatView.jsx
+│   │       ├── ChatView.jsx     ← indicador "A pesquisar..."
+│   │       ├── InterestsView.jsx ← painel de aprendizagem autónoma
+│   │       ├── MemoryBrowserView.jsx
 │   │       ├── CharacterView.jsx
-│   │       ├── MemoryBrowserView.jsx ← painel 🧠 de memórias
-│   │       ├── MessageBubble.jsx
-│   │       ├── MessageInput.jsx
-│   │       ├── ModelSelector.jsx
-│   │       ├── LanguageSelector.jsx
-│   │       └── VoiceSelector.jsx
-│   └── public/
-│       └── animations/
-│           ├── idle.webp
-│           ├── talking.webp
-│           └── pleaseme.webp
-├── CLAUDE.md / CONTEXT.md / app-map.json / agentdocs/
+│   │       └── [outros]
+│   └── public/animations/
 
-~/.personal-ai/.env              ← API keys (nunca commitar)
-~/.personal-ai/lancedb/          ← base de embeddings (local, não versionado)
-~/.personal-ai/memory.db         ← SQLite com factos (local, não versionado)
+~/.personal-ai/.env              ← ANTHROPIC_API_KEY, TAVILY_API_KEY, LM_STUDIO_URL, ...
+~/.personal-ai/lancedb/          ← embeddings locais (não versionado)
+~/.personal-ai/memory.db         ← SQLite (não versionado)
 ```
 
 ---
@@ -80,55 +94,61 @@
 ## Comandos para arrancar
 
 ```bash
-# Backend
+# Backend (Python 3.10 framework)
 cd ~/Projects/lucy/backend
-uvicorn main:app --port 8000
+/Library/Frameworks/Python.framework/Versions/3.10/bin/uvicorn main:app --port 8000
 
 # Frontend
 cd ~/Projects/lucy/frontend
 npm run dev
 # Abre http://localhost:5173
+
+# Forçar ciclo de aprendizagem manualmente
+cd ~/Projects/lucy/backend
+python3 -c "
+import asyncio, os
+from dotenv import load_dotenv
+load_dotenv(os.path.expanduser('~/.personal-ai/.env'))
+from services.learner import force_learn
+asyncio.run(force_learn('filosofia'))
+"
 ```
-
----
-
-## Próximos passos — V0.2 (Memória/Aprendizado)
-
-1. [x] Substituiu Qdrant por LanceDB (sem Docker) — dados em `~/.personal-ai/lancedb/`
-2. [x] `backend/memory/lancedb_service.py` — upsert/search de embeddings (all-MiniLM-L6-v2, 384d)
-3. [x] `backend/memory/sqlite_service.py` — log de conversas + factos em `~/.personal-ai/memory.db`
-4. [x] `backend/memory/memory_extractor.py` — extrai factos via Haiku após cada turno (async)
-5. [x] `/api/chat` injecting top-5 memórias relevantes no system prompt
-6. [x] `GET /api/memories` e `DELETE /api/memories/{id}` no backend
-7. [x] `MemoryBrowserView.jsx` — painel lateral collapsível com botão 🧠 no header
-
-### V0.2 concluído
-- [x] Ciclo completo testado e validado (conversa → extracção → injecção na sessão seguinte)
-- [x] Deduplicação semântica de factos (threshold cosine 0.88)
-- [x] Sistema prompt actualizado: Lucy não alucina quando sem memórias
-- [x] Persona reescrita: carioca natural, menos eufórica, sem "conta tudo"
-- [x] Código movido para ~/Projects/lucy/ e pushed para GitHub
-
-### Pendente V0.3
-- [ ] `IdentityPanelView.jsx` — edição da persona
-- [ ] Web search / tool use — Gemma percorre a internet via Brave Search API
 
 ---
 
 ## Contexto crítico para não perder
 
-- LM Studio deve estar aberto com `gemma-4-e4b-it-ultra-uncensored-heretic` carregado
-- Resemble token em `~/.personal-ai/.env` — mesma chave do npc-gen
-- Vozes Resemble: Vanessa `7a33e74f` (PT, cluster `f.`), restantes cluster `p.`
-- Animações em `frontend/public/animations/` — copiar de `~/Projects/lucy/3d-model/` se necessário
-- V0.2 usa LanceDB (sem Docker) — embeddings em `~/.personal-ai/lancedb/`, SQLite em `~/.personal-ai/memory.db`
-- Modelo de embeddings: `all-MiniLM-L6-v2` via sentence-transformers (384 dimensões, ~80MB, local)
-- Extracção de factos: Haiku dispara assíncronamente após cada resposta (asyncio.create_task)
-- Injecção: top-5 memórias por similaridade coseno injectadas no system prompt
+- **LM Studio** deve estar aberto com `gemma-4-e4b-it-ultra-uncensored-heretic` carregado
+- **Tavily** free tier: 1000 queries/mês — key em `~/.personal-ai/.env` como `TAVILY_API_KEY`
+- **Tool detection:** `temperature: 0` + instrução explícita no system prompt são ambos necessários para o modelo ativar tools de forma consistente
+- **Learner source format:** `"self|{interest}"` — split em `|` para agrupar no `/api/interests`; factos antigos com `source: "self"` ficam em grupo "geral"
+- **Resemble token** em `~/.personal-ai/.env` — vozes Resemble: Vanessa `7a33e74f` (PT), restantes EN
+- **LanceDB** em `~/.personal-ai/lancedb/` — schema fixo, sem campo `topic`; usar source para rastrear origem
+- **Extracção de factos:** async task após cada resposta (não bloqueia streaming)
+- **Python correcto:** `/Library/Frameworks/Python.framework/Versions/3.10/bin/` tem todas as deps instaladas
+
+---
+
+## V0.3 concluído — Pendente V0.4
+
+- [x] Web search com Tavily (tool use nativo do Gemma)
+- [x] Learner autónomo com interesses configuráveis
+- [x] Painel de aprendizagem (InterestsView)
+- [x] Toggle personagem + painel de interesses
+- [x] Persona: Lucy para de terminar cada resposta com uma pergunta
+
+### Pendente V0.4
+- [ ] `IdentityPanelView.jsx` — edição da persona em tempo real
+- [ ] Interesses da Lucy evoluem com base nas conversas (adicionar/remover automaticamente)
+- [ ] Histórico de pesquisas (o que pesquisou, quando, resultado)
+- [ ] Notificação quando o learner termina um ciclo (toast na UI)
+
+---
 
 ## Compaction prompt sugerido
 ```
 /compact Preserva: decisões de arquitectura, estrutura de ficheiros actual,
-comandos para arrancar backend e frontend, estado do V0.1 (concluído),
-próximos passos do V0.2. Resume: outputs de ferramentas e código já implementado.
+comandos para arrancar (incluindo Python path correcto), bugs críticos resolvidos
+(TAVILY_API_KEY lazy loading, tool instruction no system prompt),
+estado V0.3 concluído, pendentes V0.4. Resume: outputs de ferramentas e código.
 ```

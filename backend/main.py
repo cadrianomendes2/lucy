@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from memory.sqlite_service import init_db, delete_fact, log_turn
 from memory.lancedb_service import search_memories, get_all_memories, delete_memory
 from memory.memory_extractor import extract_and_store
+from tools.web_search import web_search
+from services.learner import start_learner
 
 load_dotenv(os.path.expanduser("~/.personal-ai/.env"))
 
@@ -57,17 +59,55 @@ with open(PERSONA_PATH, encoding="utf-8") as f:
 init_db()
 
 
+@app.on_event("startup")
+async def _startup():
+    asyncio.create_task(start_learner())
+
+
+WEB_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "Pesquisa na internet por informação actual, notícias, preços ou eventos recentes",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "termos de pesquisa"}
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+
 def get_system_prompt(language: str, memories: list[dict] | None = None) -> str:
     base = PERSONA["system_prompts"].get(language, PERSONA["system_prompts"]["pt"])
-    if not memories:
-        return (
-            f"{base}\n\n## Memória sobre o utilizador:\n"
+    sections: list[str] = []
+
+    user_facts = [m for m in (memories or []) if not m.get("source", "").startswith("self")]
+    self_knowledge = [m for m in (memories or []) if m.get("source", "").startswith("self")]
+
+    if user_facts:
+        sections.append("## O que sabes sobre o utilizador:\n" + "\n".join(f"- {m['fact']}" for m in user_facts))
+    else:
+        sections.append(
+            "## Memória sobre o utilizador:\n"
             "Ainda não tens factos guardados sobre esta pessoa. "
             "Se te perguntarem o que sabes ou o que foi dito antes, admite honestamente que não tens memória disso. "
             "Nunca inventes ou suponhas factos sobre o utilizador."
         )
-    facts_text = "\n".join(f"- {m['fact']}" for m in memories)
-    return f"{base}\n\n## O que sabes sobre o utilizador:\n{facts_text}"
+
+    if self_knowledge:
+        sections.append("## O que aprendeste por conta própria:\n" + "\n".join(f"- {m['fact']}" for m in self_knowledge))
+
+    sections.append(
+        "## Ferramenta de pesquisa:\n"
+        "Tens acesso à ferramenta web_search. "
+        "REGRA: quando a pergunta envolve eventos recentes, notícias, preços, resultados ou qualquer facto que possa ter mudado — chama web_search IMEDIATAMENTE, sem pedir permissão. "
+        "Nunca digas 'precisaria pesquisar' ou 'quer que eu pesquise'. Pesquisa e responde."
+    )
+
+    return base + "\n\n" + "\n\n".join(sections)
 
 
 class ChatRequest(BaseModel):
@@ -75,6 +115,81 @@ class ChatRequest(BaseModel):
     model: str = "gemma-lite"
     language: str = "pt"
     history: list[dict] = []
+
+
+async def _call_once(messages: list[dict], model_id: str, tools: list | None = None) -> dict:
+    payload: dict = {"model": model_id, "messages": messages, "stream": False, "max_tokens": 2048, "temperature": 0}
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            f"{LM_STUDIO_URL}/v1/chat/completions",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def _stream_messages(messages: list[dict], model_id: str):
+    payload = {"model": model_id, "messages": messages, "stream": True, "max_tokens": 2048}
+    async with httpx.AsyncClient(timeout=120) as client:
+        async with client.stream(
+            "POST",
+            f"{LM_STUDIO_URL}/v1/chat/completions",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        ) as response:
+            if response.status_code != 200:
+                yield f"data: {json.dumps({'error': f'LM Studio respondeu com {response.status_code}'})}\n\n"
+                return
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                raw = line[6:]
+                if raw == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(raw)
+                    delta = chunk["choices"][0]["delta"].get("content", "")
+                    if delta:
+                        yield f"data: {json.dumps({'text': delta})}\n\n"
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+    yield "data: [DONE]\n\n"
+
+
+async def chat_with_search(message: str, history: list[dict], model_id: str, system_prompt: str):
+    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": message}]
+    try:
+        first = await _call_once(messages, model_id, tools=[WEB_SEARCH_TOOL])
+        choice = first["choices"][0]
+        tool_calls = choice["message"].get("tool_calls")
+
+        if tool_calls:
+            tool_call = tool_calls[0]
+            args = json.loads(tool_call["function"]["arguments"])
+            query = args.get("query", "")
+            yield f"data: {json.dumps({'searching': True, 'query': query})}\n\n"
+
+            results = await web_search(query)
+
+            tool_msg = {
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps(results, ensure_ascii=False),
+            }
+            async for chunk in _stream_messages(messages + [choice["message"], tool_msg], model_id):
+                yield chunk
+        else:
+            text = choice["message"].get("content", "")
+            if text:
+                yield f"data: {json.dumps({'text': text})}\n\n"
+            yield "data: [DONE]\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
 
 
 async def stream_lm_studio(message: str, history: list[dict], model_id: str, system_prompt: str):
@@ -141,10 +256,10 @@ async def chat(req: ChatRequest):
     if req.model not in MODELS:
         raise HTTPException(status_code=400, detail=f"Modelo desconhecido: {req.model}")
 
-    relevant = search_memories(req.message, top_k=5)
+    relevant = search_memories(req.message, top_k=8)
     system_prompt = get_system_prompt(req.language, relevant)
     model_id = MODELS[req.model]
-    base = stream_lm_studio(req.message, req.history, model_id, system_prompt)
+    base = chat_with_search(req.message, req.history, model_id, system_prompt)
     generator = _stream_and_collect(base, req.message, req.model, req.language)
     return StreamingResponse(generator, media_type="text/event-stream")
 
@@ -197,6 +312,25 @@ def remove_memory(fact_id: str):
     delete_memory(fact_id)
     delete_fact(fact_id)
     return {"ok": True}
+
+
+@app.get("/api/interests")
+def list_interests():
+    all_mems = get_all_memories()
+    grouped: dict[str, list[dict]] = {}
+    for m in all_mems:
+        source = m.get("source", "")
+        if not source.startswith("self"):
+            continue
+        parts = source.split("|", 1)
+        interest = parts[1] if len(parts) > 1 else "geral"
+        grouped.setdefault(interest, []).append({
+            "id": m["id"], "fact": m["fact"], "timestamp": m["timestamp"],
+        })
+    return sorted(
+        [{"interest": k, "facts": sorted(v, key=lambda x: x["timestamp"], reverse=True)} for k, v in grouped.items()],
+        key=lambda x: -len(x["facts"]),
+    )
 
 
 @app.get("/api/health")

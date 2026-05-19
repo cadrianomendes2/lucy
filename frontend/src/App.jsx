@@ -5,6 +5,7 @@ import ModelSelector from './components/ModelSelector.jsx'
 import LanguageSelector from './components/LanguageSelector.jsx'
 import VoiceSelector from './components/VoiceSelector.jsx'
 import MemoryBrowserView from './components/MemoryBrowserView.jsx'
+import InterestsView from './components/InterestsView.jsx'
 
 const MODEL = 'gemma-lite'
 
@@ -15,6 +16,8 @@ export default function App() {
   const [animation, setAnimation] = useState('idle')
   const [resetKey, setResetKey] = useState(0)
   const [showMemory, setShowMemory] = useState(false)
+  const [showCharacter, setShowCharacter] = useState(true)
+  const [showInterests, setShowInterests] = useState(false)
 
   useEffect(() => {
     async function checkStatus() {
@@ -52,6 +55,38 @@ export default function App() {
           <LanguageSelector language={language} onChange={handleLanguageChange} />
           <ModelSelector online={online} />
           <button
+            onClick={() => setShowCharacter(v => !v)}
+            title={showCharacter ? 'Esconder personagem' : 'Mostrar personagem'}
+            style={{
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 14,
+              padding: '4px 8px',
+              color: 'inherit',
+              opacity: showCharacter ? 1 : 0.4,
+            }}
+          >
+            🖼️
+          </button>
+          <button
+            onClick={() => setShowInterests(v => !v)}
+            title="O que a Lucy aprende"
+            style={{
+              background: showInterests ? 'var(--accent, #7c5cbf)' : 'none',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 14,
+              padding: '4px 8px',
+              color: 'inherit',
+              opacity: showInterests ? 1 : 0.6,
+            }}
+          >
+            📚
+          </button>
+          <button
             onClick={() => setShowMemory(v => !v)}
             title="Memórias"
             style={{
@@ -71,7 +106,7 @@ export default function App() {
       </header>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <CharacterView animation={animation} />
+        {showCharacter && <CharacterView animation={animation} />}
         <ChatView
           key={resetKey}
           model={MODEL}
@@ -79,6 +114,7 @@ export default function App() {
           voiceUuid={voiceUuid}
           onAnimation={setAnimation}
         />
+        <InterestsView visible={showInterests} />
         <MemoryBrowserView visible={showMemory} />
       </div>
     </div>

@@ -39,6 +39,7 @@ export default function ChatView({ model, language, voiceUuid, onAnimation }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [searchingQuery, setSearchingQuery] = useState(null)
   const bottomRef = useRef(null)
   const pleasemeTimer = useRef(null)
 
@@ -104,7 +105,11 @@ export default function ChatView({ model, language, voiceUuid, onAnimation }) {
           try {
             const chunk = JSON.parse(raw)
             if (chunk.error) throw new Error(chunk.error)
+            if (chunk.searching) {
+              setSearchingQuery(chunk.query || '...')
+            }
             if (chunk.text) {
+              setSearchingQuery(null)
               finalText += chunk.text
               setMessages(prev => {
                 const updated = [...prev]
@@ -132,6 +137,7 @@ export default function ChatView({ model, language, voiceUuid, onAnimation }) {
         }
         return updated
       })
+      setSearchingQuery(null)
       setLoading(false)
 
       if (voiceUuid && finalText) {
@@ -163,6 +169,23 @@ export default function ChatView({ model, language, voiceUuid, onAnimation }) {
         {messages.map((msg, i) => (
           <MessageBubble key={i} message={msg} />
         ))}
+        {searchingQuery && (
+          <div style={{
+            margin: '4px 20px 8px',
+            padding: '7px 12px',
+            borderRadius: 8,
+            background: 'var(--bg-secondary, #1a1a2e)',
+            border: '1px solid var(--border, #333)',
+            color: 'var(--text-muted, #888)',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
+            A pesquisar: "{searchingQuery}"
+          </div>
+        )}
         {error && (
           <div style={{
             margin: '8px 20px',
