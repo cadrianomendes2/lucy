@@ -3,14 +3,13 @@ import os
 import json
 import base64
 import httpx
-import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
-from memory.sqlite_service import init_db, get_all_facts, delete_fact, log_turn
+from memory.sqlite_service import init_db, delete_fact, log_turn
 from memory.lancedb_service import search_memories, get_all_memories, delete_memory
 from memory.memory_extractor import extract_and_store
 
@@ -25,7 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234")
 RESEMBLE_TOKEN = os.getenv("RESEMBLE_TOKEN")
 RESEMBLE_SYNTH_URL_PT = os.getenv("RESEMBLE_SYNTH_URL_PT", "https://f.cluster.resemble.ai/synthesize")
@@ -43,11 +41,11 @@ VOICES = [
 SYNTH_URL_BY_UUID = {
     "7a33e74f": RESEMBLE_SYNTH_URL_PT,
 }
+
 LM_STUDIO_MODEL_LITE = os.getenv("LM_STUDIO_MODEL_LITE", "gemma-4-e4b-it-ultra-uncensored-heretic")
 LM_STUDIO_MODEL_HEAVY = os.getenv("LM_STUDIO_MODEL_HEAVY", "gemma-4-31b-it-uncensored-heretic")
 
 MODELS = {
-    "haiku": "claude-haiku-4-5",
     "gemma-lite": LM_STUDIO_MODEL_LITE,
     "gemma-heavy": LM_STUDIO_MODEL_HEAVY,
 }
@@ -56,7 +54,6 @@ PERSONA_PATH = os.path.join(os.path.dirname(__file__), "persona", "identity.json
 with open(PERSONA_PATH, encoding="utf-8") as f:
     PERSONA = json.load(f)
 
-# Inicializa SQLite na arranque
 init_db()
 
 
@@ -78,22 +75,6 @@ class ChatRequest(BaseModel):
     model: str = "gemma-lite"
     language: str = "pt"
     history: list[dict] = []
-
-
-async def stream_anthropic(message: str, history: list[dict], system_prompt: str):
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    messages = history + [{"role": "user", "content": message}]
-
-    with client.messages.stream(
-        model="claude-haiku-4-5",
-        max_tokens=2048,
-        system=system_prompt,
-        messages=messages,
-    ) as stream:
-        for text in stream.text_stream:
-            yield f"data: {json.dumps({'text': text})}\n\n"
-
-    yield "data: [DONE]\n\n"
 
 
 async def stream_lm_studio(message: str, history: list[dict], model_id: str, system_prompt: str):
@@ -134,7 +115,6 @@ async def stream_lm_studio(message: str, history: list[dict], model_id: str, sys
 
 
 async def _stream_and_collect(base_gen, user_message: str, model: str, language: str):
-    """Envolve qualquer gerador SSE, colecta o texto e dispara extracção de memória no fim."""
     collected: list[str] = []
 
     async for chunk in base_gen:
@@ -163,15 +143,8 @@ async def chat(req: ChatRequest):
 
     relevant = search_memories(req.message, top_k=5)
     system_prompt = get_system_prompt(req.language, relevant)
-
-    if req.model == "haiku":
-        if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY.startswith("sk-ant-COLOCA"):
-            raise HTTPException(status_code=400, detail="ANTHROPIC_API_KEY não configurada em ~/.personal-ai/.env")
-        base = stream_anthropic(req.message, req.history, system_prompt)
-    else:
-        model_id = MODELS[req.model]
-        base = stream_lm_studio(req.message, req.history, model_id, system_prompt)
-
+    model_id = MODELS[req.model]
+    base = stream_lm_studio(req.message, req.history, model_id, system_prompt)
     generator = _stream_and_collect(base, req.message, req.model, req.language)
     return StreamingResponse(generator, media_type="text/event-stream")
 
