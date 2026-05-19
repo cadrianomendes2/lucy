@@ -3,7 +3,7 @@
 ## Estado Actual
 **Data:** 2026-05-19
 **Sessão:** #3
-**Feature em progresso:** V0.2 sistema de memória implementado — a testar
+**Feature em progresso:** V0.2 concluído — código consolidado em ~/Projects/lucy/ e no GitHub
 
 ---
 
@@ -102,9 +102,16 @@ npm run dev
 6. [x] `GET /api/memories` e `DELETE /api/memories/{id}` no backend
 7. [x] `MemoryBrowserView.jsx` — painel lateral collapsível com botão 🧠 no header
 
-### Pendente V0.2
-- [ ] Testar ciclo completo (conversa → extracção → injecção na sessão seguinte)
-- [ ] `IdentityPanelView.jsx` — edição da persona (ver app-map.json)
+### V0.2 concluído
+- [x] Ciclo completo testado e validado (conversa → extracção → injecção na sessão seguinte)
+- [x] Deduplicação semântica de factos (threshold cosine 0.88)
+- [x] Sistema prompt actualizado: Lucy não alucina quando sem memórias
+- [x] Persona reescrita: carioca natural, menos eufórica, sem "conta tudo"
+- [x] Código movido para ~/Projects/lucy/ e pushed para GitHub
+
+### Pendente V0.3
+- [ ] `IdentityPanelView.jsx` — edição da persona
+- [ ] Web search / tool use — Gemma percorre a internet via Brave Search API
 
 ---
 
