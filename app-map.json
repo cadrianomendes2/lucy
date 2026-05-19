@@ -1,0 +1,94 @@
+{
+  "meta": {
+    "version": "1.1",
+    "lastUpdated": "2026-05-19",
+    "description": "Mapa de ecrãs da app Personal AI (Lucy)",
+    "project": "personal-ai"
+  },
+  "screens": [
+    {
+      "id": "chat-main",
+      "label": "Chat Principal",
+      "group": "V0.1 — Core",
+      "status": "done",
+      "file": "frontend/src/components/ChatView.jsx",
+      "notes": "Streaming, histórico, comando /pleaseme, chama TTS após resposta"
+    },
+    {
+      "id": "character-view",
+      "label": "Personagem 3D",
+      "group": "V0.1 — Core",
+      "status": "done",
+      "file": "frontend/src/components/CharacterView.jsx",
+      "notes": "WebP animado: idle / talking / pleaseme. Ocupa 40% do ecrã à esquerda"
+    },
+    {
+      "id": "model-selector",
+      "label": "Indicador de Modelo",
+      "group": "V0.1 — Core",
+      "status": "done",
+      "file": "frontend/src/components/ModelSelector.jsx",
+      "notes": "Bolinha verde — indica se o backend está online"
+    },
+    {
+      "id": "language-selector",
+      "label": "Selector de Idioma",
+      "group": "V0.1 — Core",
+      "status": "done",
+      "file": "frontend/src/components/LanguageSelector.jsx",
+      "notes": "🇧🇷 PT-BR / 🇬🇧 EN — muda system prompt e reinicia conversa"
+    },
+    {
+      "id": "voice-selector",
+      "label": "Selector de Voz",
+      "group": "V0.1 — Core",
+      "status": "done",
+      "file": "frontend/src/components/VoiceSelector.jsx",
+      "notes": "Dropdown com 6 vozes Resemble. Null = TTS desativado"
+    },
+    {
+      "id": "memory-browser",
+      "label": "Browser de Memória",
+      "group": "V0.2 — Consciência",
+      "status": "todo",
+      "file": "frontend/src/components/MemoryBrowserView.jsx",
+      "notes": "Lista de factos/memórias guardadas sobre o utilizador"
+    },
+    {
+      "id": "identity-panel",
+      "label": "Painel de Identidade",
+      "group": "V0.2 — Consciência",
+      "status": "todo",
+      "file": "frontend/src/components/IdentityPanelView.jsx",
+      "notes": "Persona actual, traços de personalidade, edição"
+    },
+    {
+      "id": "voice-settings",
+      "label": "Definições de Voz",
+      "group": "V0.3 — Voz",
+      "status": "todo",
+      "file": "frontend/src/components/VoiceSettingsView.jsx",
+      "notes": "V0.3 — voz de entrada (Whisper), wake word"
+    },
+    {
+      "id": "llm-evolution",
+      "label": "Painel Auto-Evolução",
+      "group": "V0.4 — Auto-evolução",
+      "status": "todo",
+      "file": "frontend/src/components/LLMEvolutionView.jsx",
+      "notes": "Estado do processo de busca/teste de novos modelos"
+    }
+  ],
+  "statusLegend": {
+    "done": "Implementado e testado",
+    "in-progress": "Em desenvolvimento",
+    "bug": "Tem bug conhecido",
+    "todo": "Ainda não iniciado"
+  },
+  "versionMap": {
+    "V0.1": ["chat-main", "character-view", "model-selector", "language-selector", "voice-selector"],
+    "V0.2": ["memory-browser", "identity-panel"],
+    "V0.3": ["voice-settings"],
+    "V0.4": ["llm-evolution"]
+  }
+}
