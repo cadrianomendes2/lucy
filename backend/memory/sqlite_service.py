@@ -14,6 +14,13 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     conn = _connect()
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS defrag_log (
+            persona_id       TEXT PRIMARY KEY,
+            last_defrag_at   TEXT NOT NULL,
+            topics_processed INTEGER DEFAULT 0,
+            facts_before     INTEGER DEFAULT 0,
+            facts_after      INTEGER DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS topics (
             persona_id  TEXT NOT NULL,
             topic       TEXT NOT NULL,
@@ -328,3 +335,74 @@ def decay_topics(persona_id: str, current_cycle: int, weak_threshold: int = 30, 
     conn.commit()
     conn.close()
     return deleted
+
+
+# ── Defrag guard ──────────────────────────────────────────────────────────────
+
+DEFRAG_COOLDOWN_HOURS = 12
+DEFRAG_MIN_FRAG_RATIO = 0.20  # mínimo 20% dos tópicos fragmentados para justificar
+
+
+def save_defrag_log(persona_id: str, topics_processed: int, facts_before: int, facts_after: int) -> None:
+    conn = _connect()
+    conn.execute("""
+        INSERT INTO defrag_log (persona_id, last_defrag_at, topics_processed, facts_before, facts_after)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(persona_id) DO UPDATE SET
+            last_defrag_at = excluded.last_defrag_at,
+            topics_processed = excluded.topics_processed,
+            facts_before = excluded.facts_before,
+            facts_after = excluded.facts_after
+    """, (persona_id, _now(), topics_processed, facts_before, facts_after))
+    conn.commit()
+    conn.close()
+
+
+def get_defrag_status(persona_id: str) -> dict:
+    """Devolve estado do guard: cooldown + score de fragmentação."""
+    from datetime import datetime, timezone, timedelta
+
+    conn = _connect()
+    row = conn.execute(
+        "SELECT last_defrag_at, topics_processed, facts_before, facts_after FROM defrag_log WHERE persona_id = ?",
+        (persona_id,)
+    ).fetchone()
+
+    # score de fragmentação: % de tópicos com research_count >= 5
+    topics = conn.execute(
+        "SELECT research_count FROM topics WHERE persona_id = ?", (persona_id,)
+    ).fetchall()
+    conn.close()
+
+    total = len(topics)
+    fragmented = sum(1 for t in topics if t["research_count"] >= 5)
+    frag_ratio = (fragmented / total) if total > 0 else 0.0
+
+    # cooldown
+    cooldown_remaining_h = 0.0
+    last_defrag_at = None
+    if row:
+        last_defrag_at = row["last_defrag_at"]
+        try:
+            last_dt = datetime.fromisoformat(last_defrag_at)
+            elapsed = datetime.now(timezone.utc) - last_dt
+            remaining = timedelta(hours=DEFRAG_COOLDOWN_HOURS) - elapsed
+            cooldown_remaining_h = max(0.0, remaining.total_seconds() / 3600)
+        except Exception:
+            pass
+
+    cooldown_ok = cooldown_remaining_h == 0.0
+    score_ok = frag_ratio >= DEFRAG_MIN_FRAG_RATIO or total == 0
+    should_defrag = cooldown_ok and score_ok
+
+    return {
+        "should_defrag": should_defrag,
+        "cooldown_ok": cooldown_ok,
+        "cooldown_remaining_h": round(cooldown_remaining_h, 1),
+        "score_ok": score_ok,
+        "frag_ratio": round(frag_ratio, 2),
+        "fragmented_topics": fragmented,
+        "total_topics": total,
+        "last_defrag_at": last_defrag_at,
+        "last": dict(row) if row else None,
+    }

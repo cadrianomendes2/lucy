@@ -1,12 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import ChatView from './components/ChatView.jsx'
 import ModelSelector from './components/ModelSelector.jsx'
 import LanguageSelector from './components/LanguageSelector.jsx'
 import VoiceSelector from './components/VoiceSelector.jsx'
 import SessionSidebar from './components/SessionSidebar.jsx'
 import RightPanel from './components/RightPanel.jsx'
-// MindOverlay mantido para uso futuro
-// import { STATIC_NODES, StaticGraph } from './components/MindOverlay.jsx'
+
+// Lazy: react-force-graph precisa de window.THREE (definido em main.jsx).
+// Com lazy import, o módulo só é carregado quando MindGraph3D renderiza pela
+// primeira vez — nessa altura window.THREE já está definido.
+const MindGraph3D = lazy(() => import('./components/MindGraph3D.jsx'))
 
 // ── Ícones ──────────────────────────────────────────────────────────────────
 
@@ -209,7 +212,7 @@ function QuadrantCard({ stat, label, header, children, style }) {
       flex: 1,
       borderRadius: 20,
       border: '1px solid var(--border)',
-      background: '#fff',
+      background: 'var(--card-bg)',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
@@ -295,10 +298,38 @@ function ProfilePage() {
   const [photoTs, setPhotoTs] = useState(Date.now())
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [loadedModels, setLoadedModels] = useState([])
+  const [modelOps, setModelOps] = useState({})   // { alias: 'loading' | 'unloading' }
   const [sysStats, setSysStats] = useState(null)
   const [playingVoice, setPlayingVoice] = useState(null)
   const photoInputRef = useRef(null)
   const statsIntervalRef = useRef(null)
+
+  const CONTROLLABLE = new Set(['gemma-lite', 'gemma-26b', 'qwen-9b-auto'])
+
+  async function refreshLoadedModels() {
+    const d = await fetch('/api/lm-models').then(r => r.json()).catch(() => ({ loaded: [] }))
+    setLoadedModels(d.loaded || [])
+  }
+
+  async function handleModelLoad(alias) {
+    setModelOps(o => ({ ...o, [alias]: 'loading' }))
+    try {
+      const r = await fetch(`/api/lm-models/${alias}/load`, { method: 'POST' })
+      if (!r.ok) { const d = await r.json(); alert(d.detail || 'Erro ao carregar modelo') }
+    } catch { alert('Erro ao conectar ao backend') }
+    await refreshLoadedModels()
+    setModelOps(o => { const n = { ...o }; delete n[alias]; return n })
+  }
+
+  async function handleModelUnload(alias) {
+    setModelOps(o => ({ ...o, [alias]: 'unloading' }))
+    try {
+      const r = await fetch(`/api/lm-models/${alias}/unload`, { method: 'POST' })
+      if (!r.ok) { const d = await r.json(); alert(d.detail || 'Erro ao descarregar modelo') }
+    } catch { alert('Erro ao conectar ao backend') }
+    await refreshLoadedModels()
+    setModelOps(o => { const n = { ...o }; delete n[alias]; return n })
+  }
 
   useEffect(() => {
     fetch('/api/personas').then(r => r.json()).then(d => setPersonas(Array.isArray(d) ? d : [])).catch(() => {})
@@ -428,7 +459,7 @@ function ProfilePage() {
     <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--surface2)' }}>
 
       {/* ── PAINEL 1: Utilizador ──────────────────────────────────────── */}
-      <div style={{ flex: '0 0 200px', width: 200, background: '#fff', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: '0 0 200px', width: 200, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Utilizador</span>
           {!editingUser
@@ -492,7 +523,7 @@ function ProfilePage() {
 
       {/* ── PAINEL 2: Personas grid ──────────────────────────────────── */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0 }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Personas · {personas.length}</span>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
@@ -507,7 +538,7 @@ function ProfilePage() {
                   style={{
                     borderRadius: 12,
                     border: `1.5px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
-                    background: isSel ? 'rgba(0,168,132,0.04)' : '#fff',
+                    background: isSel ? 'rgba(0,168,132,0.08)' : 'var(--card-bg)',
                     padding: '12px 10px 10px',
                     cursor: 'pointer',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -546,7 +577,7 @@ function ProfilePage() {
       </div>
 
       {/* ── PAINEL 3: Contextual (editor de persona OU sistema) ──────── */}
-      <div style={{ flex: '0 0 260px', width: 260, background: '#fff', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: '0 0 260px', width: 260, background: 'var(--panel-bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {selected ? (
           /* ── Editor de persona ── */
@@ -642,9 +673,11 @@ function ProfilePage() {
                       {models.map(m => {
                         const isLoaded = loadedModels.includes(m.key)
                         const tier = TIER_STYLE[m.tier]
+                        const op = modelOps[m.key]
+                        const canControl = CONTROLLABLE.has(m.key)
                         return (
                           <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)', opacity: m.tier === 'capped' ? 0.4 : 1 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: isLoaded ? '#25d366' : 'var(--border)', boxShadow: isLoaded ? '0 0 5px #25d36680' : 'none' }} />
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: isLoaded ? '#25d366' : 'var(--border)', boxShadow: isLoaded ? '0 0 5px #25d36680' : 'none', transition: 'background 0.3s' }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{m.label}</div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{m.sub}</div>
@@ -653,6 +686,26 @@ function ProfilePage() {
                             <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8, background: tier.bg, color: tier.color, flexShrink: 0, minWidth: 42, textAlign: 'center' }}>
                               {tier.label}
                             </span>
+                            {canControl && (
+                              <button
+                                onClick={() => op ? null : isLoaded ? handleModelUnload(m.key) : handleModelLoad(m.key)}
+                                disabled={!!op}
+                                title={op ? (op === 'loading' ? 'A carregar…' : 'A descarregar…') : isLoaded ? 'Descarregar modelo' : 'Carregar modelo'}
+                                style={{
+                                  width: 28, height: 28, borderRadius: 8, border: 'none', flexShrink: 0,
+                                  background: op ? 'var(--surface2)' : isLoaded ? 'rgba(239,68,68,0.1)' : 'rgba(0,168,132,0.1)',
+                                  color: op ? 'var(--text-muted)' : isLoaded ? '#ef4444' : 'var(--accent)',
+                                  cursor: op ? 'wait' : 'pointer',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  transition: 'all 0.15s',
+                                }}
+                              >
+                                {op === 'loading' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" style={{ animation: 'spin 1s linear infinite', transformOrigin: 'center' }}/></svg>}
+                                {op === 'unloading' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" style={{ animation: 'spin 1s linear infinite', transformOrigin: 'center' }}/></svg>}
+                                {!op && isLoaded && <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>}
+                                {!op && !isLoaded && <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>}
+                              </button>
+                            )}
                           </div>
                         )
                       })}
@@ -739,7 +792,7 @@ function ProfilePage() {
                             const meta = ALL_MODELS.find(m => Object.values({
                               'nemo-12b': 'nemo_roleplay_ptbr_new-i1',
                               'gemma-lite': 'gemma-4-e4b-it-ultra-uncensored-heretic',
-                              'gemma-26b': 'gemma-4-26b-a4b-it',
+                              'gemma-26b': 'gemma-4-26b-a4b-it-ultra-uncensored-heretic',
                               'qwen-9b-auto': 'qwen3.5-9b-claude-4.6-os-auto-variable-heretic-uncensored-thinking-max-neocode-imatrix',
                               'qwen-40b': 'qwen3.6-40b-claude-4.6-opus-deckard-heretic-uncensored-thinking-neo-code-di-imatrix-max',
                             })[m.key] === lm.id)
@@ -1695,7 +1748,7 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
   )
 }
 
-function MindPage({ model, language }) {
+function MindPage({ model, language, darkMode }) {
   const [personas, setPersonas] = useState([])
   const [activePersona, setActivePersona] = useState(null)
   const [activeModel, setActiveModel] = useState(model)
@@ -1705,6 +1758,12 @@ function MindPage({ model, language }) {
   const [loading, setLoading] = useState(false)
   const [defragging, setDefragging] = useState(false)
   const [defragResult, setDefragResult] = useState(null)
+  const [defragStatus, setDefragStatus] = useState(null)
+  const [use3D, setUse3D] = useState(true)
+  const [graphDims, setGraphDims] = useState({ w: 600, h: 500 })
+  const [learnedTopics3D, setLearnedTopics3D] = useState([])
+  const [topicEdges3D, setTopicEdges3D] = useState([])
+  const graphContainerRef = useRef(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -1723,11 +1782,12 @@ function MindPage({ model, language }) {
   async function selectPersona(p) {
     setActivePersona(p)
     setSelectedNode(null)
+    setLearnedTopics3D([])
+    setTopicEdges3D([])
     setMessages([
       { role: 'assistant', content: `Bem-vindo à minha mente. Este grafo mostra os meus interesses e o que aprendo.` },
       { role: 'assistant', content: `Clica num nó para explorar, ou faz-me uma pergunta sobre o meu conhecimento.` },
     ])
-    // switch persona no backend + resolve modelo com fallback
     fetch('/api/persona/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1738,6 +1798,27 @@ function MindPage({ model, language }) {
       const wanted = p.defaults?.model
       setActiveModel(wanted && loaded.includes(wanted) ? wanted : (loaded[0] || model))
     } catch { setActiveModel(p.defaults?.model || model) }
+    // carrega tópicos e arestas para o grafo 3D
+    try {
+      const topics = await fetch(`/api/topics/${p.id}`).then(r => r.json())
+      setLearnedTopics3D(Array.isArray(topics) ? topics.map(t => ({
+        interest: t.topic, count: t.research_count || 1, strength: t.strength || 1,
+      })) : [])
+    } catch {}
+    try {
+      const edges = await fetch(`/api/topic-edges/${p.id}`).then(r => r.json())
+      setTopicEdges3D(Array.isArray(edges) ? edges : [])
+      // se não há arestas, computa semanticamente
+      if (!Array.isArray(edges) || edges.length === 0) {
+        const computed = await fetch(`/api/topic-edges/${p.id}/compute`, { method: 'POST' }).then(r => r.json())
+        setTopicEdges3D(Array.isArray(computed) ? computed : [])
+      }
+    } catch {}
+    // estado do guard de defrag
+    fetch(`/api/defrag/${p.id}/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && typeof d.cooldown_remaining_h === 'number') setDefragStatus(d) })
+      .catch(() => {})
   }
 
   async function handleSelectNode(node) {
@@ -1766,17 +1847,36 @@ function MindPage({ model, language }) {
     setLoading(false)
   }
 
-  async function handleDefrag() {
+  // mede o container do grafo para passar width/height exactos ao ForceGraph3D
+  useEffect(() => {
+    if (!graphContainerRef.current) return
+    const obs = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      setGraphDims({ w: Math.floor(width), h: Math.floor(height) })
+    })
+    obs.observe(graphContainerRef.current)
+    const r = graphContainerRef.current.getBoundingClientRect()
+    setGraphDims({ w: Math.floor(r.width) || 600, h: Math.floor(r.height) || 500 })
+    return () => obs.disconnect()
+  }, [])
+
+  async function handleDefrag(force = false) {
     if (!activePersona?.id || defragging) return
     setDefragging(true)
     setDefragResult(null)
     try {
-      const r = await fetch(`/api/defrag/${activePersona.id}`, { method: 'POST' })
+      const url = `/api/defrag/${activePersona.id}${force ? '?force=true' : ''}`
+      const r = await fetch(url, { method: 'POST' })
       const d = await r.json()
       if (!r.ok) {
         setDefragResult({ error: d.detail || 'Erro ao desfragmentar' })
       } else {
         setDefragResult(d)
+        // actualiza o status do guard após defrag
+        fetch(`/api/defrag/${activePersona.id}/status`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d && typeof d.cooldown_remaining_h === 'number') setDefragStatus(d) })
+          .catch(() => {})
       }
     } catch {
       setDefragResult({ error: 'Erro ao desfragmentar' })
@@ -1837,7 +1937,7 @@ function MindPage({ model, language }) {
     <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--surface2)' }}>
 
       {/* ── PAINEL 1: Lista de personas ── */}
-      <div style={{ flex: 2, minWidth: 180, maxWidth: 280, background: '#fff', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 2, minWidth: 180, maxWidth: 280, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Personas</span>
         </div>
@@ -1867,11 +1967,12 @@ function MindPage({ model, language }) {
       </div>
 
       {/* ── PAINEL 2: Grafo por persona ── */}
-      <div style={{ flex: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f0fdf4' }}>
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+      <div style={{ flex: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--mind-bg)' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', flex: 1 }}>
-            Grafo · {activePersona?.name || '—'}
+            Mente · {activePersona?.name || '—'}
           </span>
+          {/* Feedback pós-defrag */}
           {defragResult && !defragResult.error && (
             <span style={{ fontSize: 10, color: '#7c3aed', background: 'rgba(124,58,237,0.08)', padding: '2px 8px', borderRadius: 8 }}>
               ✓ {defragResult.topics_processed} tópicos · -{defragResult.contradictions_removed} factos
@@ -1882,25 +1983,100 @@ function MindPage({ model, language }) {
               ✗ {defragResult.error}
             </span>
           )}
-          <button
-            onClick={handleDefrag}
-            disabled={defragging || !activePersona}
-            title="Consolida factos, remove contradições e recalcula arestas entre tópicos (requer Deep Mind configurado)"
-            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'none', color: defragging ? 'var(--text-muted)' : '#7c3aed', cursor: defragging ? 'wait' : 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
-          >
-            {defragging ? '⏳' : '⚙'} {defragging ? 'A desfragmentar…' : 'Desfragmentar'}
-          </button>
-          <span style={{ fontSize: 11, color: 'var(--accent)' }}>10s</span>
+          {/* Botão Defrag com guard */}
+          {(() => {
+            const blocked = defragStatus && !defragStatus.should_defrag
+            const inCooldown = defragStatus && !defragStatus.cooldown_ok
+            const lowScore = defragStatus && defragStatus.cooldown_ok && !defragStatus.score_ok
+            const tooltip = inCooldown
+              ? `Cooldown activo — último defrag há ${defragStatus.cooldown_remaining_h}h`
+              : lowScore
+              ? `Fragmentação baixa (${Math.round((defragStatus.frag_ratio || 0) * 100)}% dos tópicos). Conhecimento já consolidado.`
+              : 'Consolida factos e recalcula arestas (requer Deep Mind)'
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                <button
+                  onClick={() => handleDefrag(false)}
+                  disabled={defragging || !activePersona || blocked}
+                  title={tooltip}
+                  style={{
+                    fontSize: 11, padding: '4px 10px', borderRadius: 8,
+                    border: `1px solid ${blocked ? 'var(--border)' : '#7c3aed22'}`,
+                    background: blocked ? 'var(--surface2)' : 'none',
+                    color: defragging ? 'var(--text-muted)' : blocked ? 'var(--text-muted)' : '#7c3aed',
+                    cursor: defragging || blocked ? 'default' : 'pointer',
+                    fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4,
+                  }}
+                >
+                  {defragging ? '⏳' : blocked ? '🔒' : '⚙'}
+                  {defragging ? 'A desfragmentar…'
+                    : inCooldown ? `Defrag (${defragStatus.cooldown_remaining_h}h)`
+                    : lowScore ? `Defrag (${Math.round((defragStatus?.frag_ratio || 0) * 100)}%)`
+                    : 'Defrag'}
+                </button>
+                {/* Força o defrag mesmo com guard activo */}
+                {blocked && !defragging && (
+                  <button
+                    onClick={() => handleDefrag(true)}
+                    title="Forçar defrag ignorando guard"
+                    style={{ fontSize: 9, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                  >
+                    forçar
+                  </button>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Toggle 2D / 3D */}
+          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+            {['2D', '3D'].map(mode => (
+              <button
+                key={mode}
+                onClick={() => setUse3D(mode === '3D')}
+                style={{
+                  padding: '4px 10px', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  background: (use3D ? '3D' : '2D') === mode ? 'var(--accent)' : 'none',
+                  color: (use3D ? '3D' : '2D') === mode ? '#fff' : 'var(--text-muted)',
+                  transition: 'background 0.15s',
+                }}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ flex: 1, overflow: 'hidden', padding: 8, display: 'flex' }}>
-          {activePersona && (
-            <PersonaGraph persona={activePersona} selectedNode={selectedNode} onSelectNode={handleSelectNode} />
+
+        <div ref={graphContainerRef} style={{ flex: 1, overflow: 'hidden', display: 'flex', position: 'relative' }}>
+          {activePersona && use3D && (
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>A carregar grafo 3D…</div>}>
+              <MindGraph3D
+                persona={activePersona}
+                learnedTopics={learnedTopics3D}
+                topicEdges={topicEdges3D}
+                selectedNode={selectedNode}
+                onSelectNode={handleSelectNode}
+                width={graphDims.w}
+                height={graphDims.h}
+                darkMode={darkMode}
+              />
+            </Suspense>
+          )}
+          {activePersona && !use3D && (
+            <div style={{ flex: 1, padding: 8, display: 'flex' }}>
+              <PersonaGraph persona={activePersona} selectedNode={selectedNode} onSelectNode={handleSelectNode} />
+            </div>
           )}
         </div>
         {selectedNode && !selectedNode.central && (
-          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-            <div style={{ width: 9, height: 9, borderRadius: '50%', background: selectedNode.color?.startsWith('var') ? '#00a884' : selectedNode.color }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{selectedNode.label}</span>
+          <div style={{ padding: '10px 16px', borderTop: `2px solid ${selectedNode.isEmergent ? '#f59e0b' : 'var(--border)'}`, background: selectedNode.isEmergent ? 'rgba(245,158,11,0.08)' : 'var(--panel-bg)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <div style={{ width: 9, height: 9, borderRadius: '50%', background: selectedNode.color || '#00a884', flexShrink: 0 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{selectedNode.label}</span>
+              {selectedNode.isEmergent && (
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#d97706', letterSpacing: '0.06em', textTransform: 'uppercase' }}>★ interesse emergente — pode tornar-se um novo root</span>
+              )}
+            </div>
             {selectedNode.factCount > 0 && (
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{selectedNode.factCount} factos</span>
             )}
@@ -1923,7 +2099,7 @@ function MindPage({ model, language }) {
       </div>
 
       {/* ── PAINEL 3: Chat com a persona ── */}
-      <div style={{ flex: 2, minWidth: 220, background: '#fff', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 2, minWidth: 220, background: 'var(--panel-bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
           {activePersona && (
             <div style={{ width: 30, height: 30, borderRadius: '50%', overflow: 'hidden', border: '2px solid var(--accent)', flexShrink: 0 }}>
@@ -2235,7 +2411,7 @@ function LearnPage() {
     <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--surface2)' }}>
 
       {/* ── PAINEL 1: Controlo ── */}
-      <div style={{ flex: 2, minWidth: 200, maxWidth: 280, background: '#fff', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 2, minWidth: 200, maxWidth: 280, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Auto-Aprendizagem</div>
           <div style={{ fontSize: 11, color: status.running ? 'var(--accent)' : 'var(--text-muted)', marginTop: 2 }}>
@@ -2375,7 +2551,7 @@ function LearnPage() {
 
       {/* ── PAINEL 2: Feed ao vivo ── */}
       <div style={{ flex: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Feed ao vivo</span>
           <div style={{ display: 'flex', gap: 6 }}>
             {['feed', 'timeline'].map(t => (
@@ -2390,7 +2566,7 @@ function LearnPage() {
           <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
             {/* Actividade actual */}
             {status.current && (
-              <div style={{ background: '#fff', border: '1.5px solid var(--accent)', borderRadius: 14, padding: '16px 18px', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>
+              <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--accent)', borderRadius: 14, padding: '16px 18px', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite' }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{status.current.persona}</span>
@@ -2420,7 +2596,7 @@ function LearnPage() {
               {status.timeline.slice(0, 8).map((entry, i) => {
                 const isSynth = entry.synthesis_report
                 return (
-                  <div key={i} style={{ background: isSynth ? 'rgba(245,158,11,0.06)' : '#fff', border: `1px solid ${isSynth ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`, borderRadius: 12, padding: '12px 14px' }}>
+                  <div key={i} style={{ background: isSynth ? 'rgba(245,158,11,0.08)' : 'var(--card-bg)', border: `1px solid ${isSynth ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`, borderRadius: 12, padding: '12px 14px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                       <div style={{ width: 28, height: 28, borderRadius: '50%', overflow: 'hidden', border: `1.5px solid ${isSynth ? 'rgba(245,158,11,0.5)' : 'var(--border)'}`, flexShrink: 0 }}>
                         <img src={entry.avatar || '/animations/idle.webp'} alt={entry.persona} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
@@ -2493,7 +2669,7 @@ function LearnPage() {
                             <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${isSynth ? '#f59e0b' : 'var(--accent)'}`, flexShrink: 0, zIndex: 1, background: '#fff' }}>
                               <img src={entry.avatar || '/animations/idle.webp'} alt={entry.persona} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
                             </div>
-                            <div style={{ flex: 1, background: isSynth ? 'rgba(245,158,11,0.05)' : '#fff', border: `1px solid ${isSynth ? 'rgba(245,158,11,0.35)' : 'var(--border)'}`, borderRadius: 10, padding: '9px 12px' }}>
+                            <div style={{ flex: 1, background: isSynth ? 'rgba(245,158,11,0.08)' : 'var(--card-bg)', border: `1px solid ${isSynth ? 'rgba(245,158,11,0.35)' : 'var(--border)'}`, borderRadius: 10, padding: '9px 12px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{entry.persona}</span>
                                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 6,
@@ -2522,7 +2698,7 @@ function LearnPage() {
       </div>
 
       {/* ── PAINEL 3: Estatísticas por persona ── */}
-      <div style={{ flex: 2, minWidth: 200, maxWidth: 280, background: '#fff', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 2, minWidth: 200, maxWidth: 280, background: 'var(--panel-bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Por persona</span>
         </div>
@@ -2579,6 +2755,14 @@ function SettingsPage() {
 export default function App() {
   const [page, setPage] = useState(() => localStorage.getItem('last_page') || 'chat')
   const [photoTs, setPhotoTs] = useState(Date.now())
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark')
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+
+  // aplica data-theme ao <html> para as CSS vars funcionarem
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
+    localStorage.setItem('theme', darkMode ? 'dark' : 'light')
+  }, [darkMode])
 
   const [model, setModel] = useState('gemma-lite')
   const [thinkingMode, setThinkingMode] = useState('off')
@@ -2705,13 +2889,13 @@ export default function App() {
       background: 'var(--surface)',
       borderRadius: 20,
       overflow: 'hidden',
-      boxShadow: '0 8px 48px rgba(0,0,0,0.14)',
+      boxShadow: '0 8px 48px var(--shadow)',
     }}>
 
       {/* ── RAIL ─────────────────────────────────────────────────────────── */}
       <div style={{
         width: 72,
-        background: '#fff',
+        background: 'var(--rail-bg)',
         borderRight: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
@@ -2734,16 +2918,36 @@ export default function App() {
           </RailIcon>
         ))}
 
-        {/* ── Avatar do utilizador no fundo do rail → vai para Perfil ── */}
-        <div style={{ marginTop: 'auto' }}>
+        {/* ── Toggle dark mode (empurrado para o fundo) ── */}
+        <button
+          onClick={() => setDarkMode(d => !d)}
+          title={darkMode ? 'Modo claro' : 'Modo escuro'}
+          style={{
+            width: 44, height: 44, borderRadius: 12, border: 'none',
+            background: 'none', color: 'var(--text-muted)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'color 0.15s', marginTop: 'auto',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-soft)'; e.currentTarget.style.background = 'var(--surface2)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'none' }}
+        >
+          {darkMode
+            ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          }
+        </button>
+
+        {/* ── Avatar do utilizador + mini menu ── */}
+        <div style={{ marginTop: 4, position: 'relative' }}>
           <button
-            onClick={() => navigateTo('profile')}
-            title="Perfil"
+            onClick={() => setUserMenuOpen(v => !v)}
+            title="Menu utilizador"
             style={{
-              width: 42, height: 42, borderRadius: '50%', border: `2px solid ${page === 'profile' ? 'var(--accent)' : 'var(--border)'}`,
+              width: 42, height: 42, borderRadius: '50%',
+              border: `2px solid ${userMenuOpen || page === 'profile' ? 'var(--accent)' : 'var(--border)'}`,
               overflow: 'hidden', cursor: 'pointer', padding: 0, background: 'var(--surface2)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8,
-              position: 'relative', transition: 'border-color 0.15s',
+              position: 'relative', transition: 'border-color 0.15s', flexShrink: 0,
             }}
           >
             <IconPerson />
@@ -2755,6 +2959,37 @@ export default function App() {
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
           </button>
+          {userMenuOpen && (
+            <>
+              <div onClick={() => setUserMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+              <div style={{
+                position: 'absolute', bottom: 52, left: 8,
+                background: 'var(--panel-bg)', border: '1px solid var(--border)',
+                borderRadius: 12, boxShadow: '0 4px 24px var(--shadow)',
+                zIndex: 100, minWidth: 160, overflow: 'hidden',
+              }}>
+                <button onClick={() => { setUserMenuOpen(false); navigateTo('profile') }}
+                  style={{ width: '100%', padding: '10px 14px', background: 'none', border: 'none', textAlign: 'left', fontSize: 13, color: 'var(--text)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <IconPerson /> Ver perfil
+                </button>
+                <button onClick={() => { setUserMenuOpen(false); document.getElementById('rail-photo-input')?.click() }}
+                  style={{ width: '100%', padding: '10px 14px', background: 'none', border: 'none', borderTop: '1px solid var(--border)', textAlign: 'left', fontSize: 13, color: 'var(--text)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  Alterar foto
+                </button>
+              </div>
+            </>
+          )}
+          <input id="rail-photo-input" type="file" accept="image/*" style={{ display: 'none' }}
+            onChange={async e => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              const fd = new FormData(); fd.append('file', file)
+              await fetch('/api/user/photo', { method: 'POST', body: fd }).catch(() => {})
+              setPhotoTs(Date.now())
+              e.target.value = ''
+            }}
+          />
         </div>
       </div>
 
@@ -2762,7 +2997,7 @@ export default function App() {
       {page === 'chat' && (
         <div style={{
           flex: 2, minWidth: 180, maxWidth: 300,
-          background: '#fff',
+          background: 'var(--sidebar-bg)',
           borderRight: '1px solid var(--border)',
           display: 'flex',
           flexDirection: 'column',
@@ -2820,7 +3055,7 @@ export default function App() {
         )}
 
         {page === 'mind' && (
-          <MindPage model={model} language={language} />
+          <MindPage model={model} language={language} darkMode={darkMode} />
         )}
 
         {page === 'learn' && (

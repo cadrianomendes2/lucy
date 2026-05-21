@@ -10,6 +10,7 @@
   --bg: #f5f6fa;
   --surface: #ffffff;
   --surface2: #f0f2f5;
+  --surface3: #e9edef;
   --border: #e9edef;
   --accent: #00a884;
   --accent2: #25d366;
@@ -19,6 +20,40 @@
   --user-bubble: #d9fdd3;
   --ai-bubble: #ffffff;
   --danger: #f04;
+  --shadow: rgba(0,0,0,0.14);
+  --input-bg: #f0f2f5;
+  --rail-bg: #ffffff;
+  --sidebar-bg: #ffffff;
+  --header-bg: #ffffff;
+  --panel-bg: #ffffff;
+  --mind-bg: #f8fafc;
+  --card-bg: #ffffff;
+  --overlay-bg: rgba(0,0,0,0.45);
+}
+
+[data-theme="dark"] {
+  --bg: #0b141a;
+  --surface: #1f2c34;
+  --surface2: #2a3942;
+  --surface3: #3b4a54;
+  --border: #2a3942;
+  --accent: #00a884;
+  --accent2: #25d366;
+  --text: #e9edef;
+  --text-muted: #8696a0;
+  --text-soft: #aebac1;
+  --user-bubble: #005c4b;
+  --ai-bubble: #1f2c34;
+  --danger: #f04;
+  --shadow: rgba(0,0,0,0.4);
+  --input-bg: #2a3942;
+  --rail-bg: #111b21;
+  --sidebar-bg: #111b21;
+  --header-bg: #1f2c34;
+  --panel-bg: #1f2c34;
+  --mind-bg: #111b21;
+  --card-bg: #1f2c34;
+  --overlay-bg: rgba(0,0,0,0.65);
 }
 
 body {

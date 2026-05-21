@@ -6,6 +6,19 @@
     <title>Lucy</title>
   </head>
   <body>
+    <script>
+      // Stub A-Frame: react-force-graph inclui aframe-extras com registerComponent.
+      // A-Frame não é usado na app — este stub evita erros ao inicializar o módulo.
+      window.AFRAME = {
+        registerComponent: function() {},
+        registerSystem: function() {},
+        registerPrimitive: function() {},
+        components: {},
+        Element: class {},
+        System: class {},
+        utils: { shouldCaptureKeyEvent: function() { return false; } }
+      };
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

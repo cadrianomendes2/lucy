@@ -20,6 +20,7 @@ from memory.sqlite_service import (
     upsert_topic, get_topics, decay_topics,
     upsert_topic_edge, get_topic_edges, delete_topic_edges,
     save_learner_entry, get_learner_history,
+    save_defrag_log, get_defrag_status,
 )
 from memory.lancedb_service import search_memories, get_all_memories, delete_memory, wipe_all_memories, get_topic_vectors, cosine_similarity
 from memory.memory_extractor import extract_and_store
@@ -71,7 +72,7 @@ MODELS = {
     "qwen-9b-auto": os.getenv("LM_STUDIO_MODEL_QWEN9BAUTO", "qwen3.5-9b-claude-4.6-os-auto-variable-heretic-uncensored-thinking-max-neocode-imatrix"),
     "gemma-lite":   os.getenv("LM_STUDIO_MODEL_LITE",       "gemma-4-e4b-it-ultra-uncensored-heretic"),
     "qwen-27b":     os.getenv("LM_STUDIO_MODEL_QWEN27B",    "qwen3.5-27b-claude-4.6-opus-reasoning-distilled-i1"),
-    "gemma-26b":    os.getenv("LM_STUDIO_MODEL_GEMMA26B",   "gemma-4-26b-a4b-it"),
+    "gemma-26b":    os.getenv("LM_STUDIO_MODEL_GEMMA26B",   "gemma-4-26b-a4b-it-ultra-uncensored-heretic"),
     "gpt-20b":      os.getenv("LM_STUDIO_MODEL_GPT20B",     "openai-gpt-oss-20b-heretic-uncensored-neo-imatrix"),
     "qwen-9b":      os.getenv("LM_STUDIO_MODEL_QWEN9B",     "qwen3.5-9b-claude-4.6-os-heretic-uncensored-instruct-i1"),
 }
@@ -862,6 +863,12 @@ async def init_reasoning_models():
     return {"ok": True}
 
 
+LMS_CLI = os.path.expanduser("~/.lmstudio/bin/lms")
+
+# Modelos com botão play/stop na UI
+CONTROLLABLE_MODELS = {"gemma-lite", "gemma-26b", "qwen-9b-auto"}
+
+
 @app.get("/api/lm-models")
 async def lm_models():
     try:
@@ -873,6 +880,67 @@ async def lm_models():
             return {"loaded": loaded_keys, "loaded_ids": list(loaded_ids)}
     except Exception:
         return {"loaded": [], "loaded_ids": []}
+
+
+@app.get("/api/lm-models/available")
+async def lm_models_available():
+    """Lista modelos controláveis com o seu estado actual (loaded / not-loaded)."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{LM_STUDIO_URL}/api/v0/models")
+            r.raise_for_status()
+            all_models = {m["id"]: m.get("state", "not-loaded") for m in r.json().get("data", [])}
+    except Exception:
+        all_models = {}
+
+    result = []
+    for alias in CONTROLLABLE_MODELS:
+        raw_id = MODELS.get(alias)
+        if not raw_id:
+            continue
+        state = all_models.get(raw_id, "not-loaded")
+        result.append({"alias": alias, "model_id": raw_id, "state": state})
+    return result
+
+
+@app.post("/api/lm-models/{alias}/load")
+async def load_model(alias: str):
+    if alias not in CONTROLLABLE_MODELS:
+        raise HTTPException(status_code=400, detail=f"Modelo '{alias}' não é controlável.")
+    raw_id = MODELS.get(alias)
+    if not raw_id:
+        raise HTTPException(status_code=404, detail="Alias não encontrado.")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            LMS_CLI, "load", raw_id,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail=stderr.decode()[:200])
+        return {"ok": True, "alias": alias, "model_id": raw_id}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout ao carregar modelo.")
+
+
+@app.post("/api/lm-models/{alias}/unload")
+async def unload_model(alias: str):
+    if alias not in CONTROLLABLE_MODELS:
+        raise HTTPException(status_code=400, detail=f"Modelo '{alias}' não é controlável.")
+    raw_id = MODELS.get(alias)
+    if not raw_id:
+        raise HTTPException(status_code=404, detail="Alias não encontrado.")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            LMS_CLI, "unload", raw_id,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail=stderr.decode()[:200])
+        return {"ok": True, "alias": alias, "model_id": raw_id}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout ao descarregar modelo.")
 
 
 # ── Deep Mind helpers ─────────────────────────────────────────────────────────
@@ -1095,13 +1163,27 @@ async def force_synthesize(persona_id: str):
     return {"ok": True, "summary": summary}
 
 
+@app.get("/api/defrag/{persona_id}/status")
+def defrag_status(persona_id: str):
+    return get_defrag_status(persona_id)
+
+
 @app.post("/api/defrag/{persona_id}")
-async def defrag_persona(persona_id: str):
+async def defrag_persona(persona_id: str, force: bool = False):
+    # guard: cooldown + score
+    if not force:
+        status = get_defrag_status(persona_id)
+        if not status["cooldown_ok"]:
+            raise HTTPException(status_code=429, detail=f"Cooldown activo — último defrag há {status['cooldown_remaining_h']}h. Usa force=true para ignorar.")
+        if not status["score_ok"]:
+            raise HTTPException(status_code=400, detail=f"Fragmentação baixa ({status['frag_ratio']*100:.0f}% dos tópicos). Conhecimento já consolidado.")
+
     config = DEEP_MIND_CONFIG.get(persona_id, {})
     rm_id = await _get_loaded_reasoning_model(config.get("reasoning_models", []))
     if not rm_id:
         raise HTTPException(status_code=400, detail="Nenhum modelo reasoning carregado. Configura o Deep Mind primeiro.")
     stats = await _defrag_persona_memory(persona_id, rm_id)
+    save_defrag_log(persona_id, stats.get("topics_processed", 0), stats.get("facts_before", 0), stats.get("facts_after", 0))
     return {"ok": True, **stats}
 
 
