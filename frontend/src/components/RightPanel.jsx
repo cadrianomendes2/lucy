@@ -27,7 +27,7 @@ export default function RightPanel({ open, onClose, personaName = 'Lucy', person
   async function wipeMemories() {
     if (!window.confirm('Apagar TODAS as memórias? Esta acção não pode ser desfeita.')) return
     const pin = window.prompt('Confirma com o teu PIN:')
-    if (pin !== '1213') { if (pin !== null) window.alert('PIN incorrecto.'); return }
+    if (pin !== (import.meta.env.VITE_PRO_PIN || '1213')) { if (pin !== null) window.alert('PIN incorrecto.'); return }
     setWiping(true)
     await fetch('/api/memories', { method: 'DELETE' }).catch(() => {})
     setMemoriesUser([])

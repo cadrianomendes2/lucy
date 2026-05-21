@@ -14,11 +14,19 @@ dist/
 # Env e segredos
 .env
 .env.*
+!**/.env.example    # templates sem segredos são commitados
 *.key
+*.pem
+*.p12
+
+# Claude Code (pode conter API keys em allowed commands)
+.claude/settings.local.json
 
 # macOS
 .DS_Store
+.AppleDouble
 
 # Editores
 .vscode/settings.json
 *.swp
+*.swo

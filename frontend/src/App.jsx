@@ -2155,7 +2155,7 @@ function MindPage({ model, language, darkMode }) {
 
 // ── PIN Modal (Pro) ──────────────────────────────────────────────────────────
 
-const PRO_PIN = '1213'
+const PRO_PIN = import.meta.env.VITE_PRO_PIN || '1213'
 
 function PinModal({ onSuccess, onCancel }) {
   const [digits, setDigits] = useState('')
