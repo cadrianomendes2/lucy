@@ -110,6 +110,12 @@ Painel 2 – Grafo dinâmico
   • Nós anel: tópicos conhecidos (fixos + aprendidos)
   • Tamanho do nó ∝ força (strength) do tópico
   • Nó fraco (strength < 1.5): semi-transparente + anel vermelho tracejado + "⚠ fraco"
+  • Arestas entre nós: calculadas pelo Desfragmentar (via /api/topic-edges/{persona_id})
+  • Header do grafo tem botão "⚙ Desfragmentar":
+      • Usa o reasoning model configurado no Deep Mind
+      • Consolida factos por tópico (remove duplicados/contradições, compacta em 3 factos densos)
+      • Recalcula arestas entre tópicos semanticamente relacionados
+      • Devolve: tópicos processados, factos antes/depois, contradições removidas
   • Clicar num nó → bottom bar com:
       • Número de factos
       • Botão "apagar" (remove todos os factos do tópico + confirma)
@@ -134,6 +140,16 @@ Painel 1 – Controlo
   • Campo: limite de ciclos (vazio = ilimitado)
   • Estimativa: "Ciclo completo: ~N min"
   • Botão ▶ Iniciar / ⏹ Parar (verde/vermelho)
+
+  DEEP MIND (secção abaixo dos botões):
+    • Toggle "Deep Mind" — cinzento/bloqueado se nenhum reasoning model carregado
+    • Tooltip: "Necessita de modelo reasoning ligado"
+    • ⚙ ao lado → config inline: adicionar/remover nomes exactos do LM Studio
+        Verde = carregado | cinzento = não carregado
+    • Quando Deep Mind ON:
+        – Auto Síntese: toggle + campo "a cada N ciclos" (padrão 10)
+          Resumo aparece no feed como card 🧠 dourado
+        – Botão "Sintetizar" → força síntese imediata para personas activas
 
 Painel 2 – Feed ao vivo (tabs: Ao vivo | Timeline)
   Ao vivo:

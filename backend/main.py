@@ -18,8 +18,10 @@ from memory.sqlite_service import (
     create_session, update_session_title, touch_session,
     get_sessions, get_session_messages, delete_session, count_session_turns,
     upsert_topic, get_topics, decay_topics,
+    upsert_topic_edge, get_topic_edges, delete_topic_edges,
+    save_learner_entry, get_learner_history,
 )
-from memory.lancedb_service import search_memories, get_all_memories, delete_memory, wipe_all_memories
+from memory.lancedb_service import search_memories, get_all_memories, delete_memory, wipe_all_memories, get_topic_vectors, cosine_similarity
 from memory.memory_extractor import extract_and_store
 from tools.web_search import web_search
 from services.learner import start_learner
@@ -75,6 +77,12 @@ MODELS = {
 }
 
 REASONING_MODELS = {"qwen-27b", "qwen-40b", "qwen-9b-auto", "qwen-9b"}
+
+# reasoning models pré-definidos para o Deep Mind (aliases e tiers)
+DEEP_MIND_MODELS = [
+    {"alias": "qwen-9b-auto", "label": "Qwen3.5", "tier": "medium"},
+    {"alias": "qwen-40b",     "label": "Qwen3.6", "tier": "high"},
+]
 THINKING_BUDGETS = {"fast": 512, "medium": 2048, "heavy": 8192}
 
 LM_STUDIO_MODEL_LITE = MODELS["gemma-lite"]
@@ -101,6 +109,7 @@ class AutoLearner:
         self.current: dict | None = None  # actividade actual
         self._task: asyncio.Task | None = None
         self._cycles: dict[str, int] = {}  # persona_id → nº de ciclos
+        self.deep_config: dict[str, dict] = {}  # persona_id → DeepMind config
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -139,6 +148,31 @@ class AutoLearner:
                 )
                 topic = r.json()["choices"][0]["message"]["content"].strip().strip('"\'').split("\n")[0].strip()
             if topic and len(topic) < 60:
+                return topic
+        except Exception:
+            pass
+        return None
+
+    async def _extract_subtopic(self, broad_interest: str, insights: list[str]) -> str | None:
+        """Dado um interesse amplo e os factos extraídos, devolve o conceito específico explorado."""
+        if not insights:
+            return None
+        facts_str = "\n".join(f"- {f}" for f in insights[:3])
+        prompt = (
+            f"Interesse amplo: '{broad_interest}'\n"
+            f"Factos aprendidos:\n{facts_str}\n\n"
+            f"Qual é o conceito ou tema ESPECÍFICO que estes factos exploram?\n"
+            f"Responde APENAS com o nome do conceito (máximo 5 palavras, sem pontuação final). Zero explicações."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(
+                    f"{LM_STUDIO_URL}/v1/chat/completions",
+                    json={"model": MODELS["gemma-lite"], "messages": [{"role": "user", "content": prompt}],
+                          "stream": False, "max_tokens": 15, "temperature": 0.3},
+                )
+                topic = r.json()["choices"][0]["message"]["content"].strip().strip('"\'.,').split("\n")[0].strip()
+            if topic and 3 <= len(topic) <= 60:
                 return topic
         except Exception:
             pass
@@ -257,6 +291,14 @@ class AutoLearner:
             return
         self.current["status"] = "a sintetizar"
         insights = await self._extract(interest, results)
+
+        # para interesses fixos: extrair o sub-tópico específico explorado
+        # (transforma "comunismo" → "materialismo histórico de Marx")
+        if not discovery and insights:
+            specific = await self._extract_subtopic(interest, insights)
+            if specific and specific.lower() != interest.lower():
+                print(f"[AutoLearner] {name} → sub-tópico: '{specific}'")
+                interest = specific
         print(f"[AutoLearner] {name} → {len(insights)} insights extraídos")
         ts = self._now()
         for insight in insights:
@@ -272,11 +314,33 @@ class AutoLearner:
             upsert_edge(persona_node_id, domain_id, relation="aprendeu", weight=float(len(insights)))
         except Exception as e:
             print(f"[AutoLearner] graph update failed: {e}")
-        entry = {"persona": name, "persona_id": persona_id, "avatar": data.get("avatar_url", ""), "interest": interest, "insights": insights, "timestamp": ts, "discovery": discovery, "synthesis": synthesis}
+        entry = {"id": str(uuid.uuid4()), "persona": name, "persona_id": persona_id, "avatar": data.get("avatar_url", ""), "interest": interest, "insights": insights, "timestamp": ts, "discovery": discovery, "synthesis": synthesis}
         self.timeline.insert(0, entry)
         if len(self.timeline) > 200:
             self.timeline = self.timeline[:200]
+        save_learner_entry(entry)
         self.current = None
+
+        # auto-síntese Deep Mind
+        deep = self.deep_config.get(persona_id, {})
+        n = deep.get("auto_synth_cycles", 10)
+        if deep.get("enabled") and deep.get("auto_synth") and n > 0 and cycle % n == 0:
+            rm_id = await _get_loaded_reasoning_model(deep.get("reasoning_models", []))
+            if rm_id:
+                print(f"[AutoLearner] {name} [{cycle}] → 🧠 auto-síntese...")
+                try:
+                    summary = await _synthesize_for_persona(persona_id, rm_id)
+                    if summary:
+                        synth_entry = {
+                            "id": str(uuid.uuid4()), "persona": name, "persona_id": persona_id,
+                            "avatar": data.get("avatar_url", ""), "interest": "síntese",
+                            "insights": [summary], "timestamp": self._now(),
+                            "discovery": False, "synthesis": False, "synthesis_report": True,
+                        }
+                        self.timeline.insert(0, synth_entry)
+                        save_learner_entry(synth_entry)
+                except Exception as e:
+                    print(f"[AutoLearner] {name} auto-síntese falhou: {e}")
 
     async def _loop(self):
         persona_order = ["lucy", "samantha", "marvin", "glados"]
@@ -316,6 +380,9 @@ class AutoLearner:
 
 
 auto_learner = AutoLearner()
+
+# Deep Mind config por persona (em memória; reset ao reiniciar o backend)
+DEEP_MIND_CONFIG: dict[str, dict] = {}
 
 
 @app.on_event("startup")
@@ -759,6 +826,42 @@ def list_interests(persona_id: str | None = None):
     )
 
 
+@app.get("/api/reasoning-models")
+async def get_reasoning_models():
+    """Devolve os reasoning models pré-definidos e se estão carregados."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{LM_STUDIO_URL}/api/v0/models")
+            r.raise_for_status()
+            loaded_ids = {m["id"] for m in r.json().get("data", []) if m.get("state") == "loaded"}
+    except Exception:
+        loaded_ids = set()
+    return [
+        {**dm, "model_id": MODELS[dm["alias"]], "loaded": MODELS[dm["alias"]] in loaded_ids}
+        for dm in DEEP_MIND_MODELS
+    ]
+
+
+@app.post("/api/reasoning-models/init")
+async def init_reasoning_models():
+    """Pré-configura os reasoning models em todos os DEEP_MIND_CONFIG de personas."""
+    model_ids = [MODELS[dm["alias"]] for dm in DEEP_MIND_MODELS]
+    persona_dir = os.path.join(os.path.dirname(__file__), "persona")
+    for fname in os.listdir(persona_dir):
+        if not fname.endswith(".json") or fname == "identity.json":
+            continue
+        pid = fname.replace(".json", "")
+        existing = DEEP_MIND_CONFIG.get(pid, {})
+        DEEP_MIND_CONFIG[pid] = {
+            "enabled": existing.get("enabled", False),
+            "reasoning_models": model_ids,
+            "auto_synth": existing.get("auto_synth", False),
+            "auto_synth_cycles": existing.get("auto_synth_cycles", 10),
+        }
+        auto_learner.deep_config[pid] = DEEP_MIND_CONFIG[pid]
+    return {"ok": True}
+
+
 @app.get("/api/lm-models")
 async def lm_models():
     try:
@@ -767,9 +870,278 @@ async def lm_models():
             r.raise_for_status()
             loaded_ids = {m["id"] for m in r.json().get("data", []) if m.get("state") == "loaded"}
             loaded_keys = [key for key, model_id in MODELS.items() if model_id in loaded_ids]
-            return {"loaded": loaded_keys}
+            return {"loaded": loaded_keys, "loaded_ids": list(loaded_ids)}
     except Exception:
-        return {"loaded": []}
+        return {"loaded": [], "loaded_ids": []}
+
+
+# ── Deep Mind helpers ─────────────────────────────────────────────────────────
+
+async def _get_loaded_reasoning_model(reasoning_models: list[str]) -> str | None:
+    """Devolve o primeiro reasoning model configurado que esteja carregado no LM Studio."""
+    if not reasoning_models:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{LM_STUDIO_URL}/api/v0/models")
+            r.raise_for_status()
+            loaded_ids = {m["id"] for m in r.json().get("data", []) if m.get("state") == "loaded"}
+        for rm in reasoning_models:
+            if rm in loaded_ids:
+                return rm
+    except Exception:
+        pass
+    return None
+
+
+async def _synthesize_for_persona(persona_id: str, reasoning_model_id: str, recent_count: int = 20) -> str | None:
+    """Gera resumo das últimas N aprendizagens usando o reasoning model."""
+    all_mems = get_all_memories()
+    prefix = f"self_{persona_id}|"
+    recent = sorted(
+        [m for m in all_mems if m.get("source", "").startswith(prefix)],
+        key=lambda m: m.get("timestamp", ""),
+        reverse=True
+    )[:recent_count]
+    if not recent:
+        return None
+    persona_data = _load_persona_file(persona_id) or {}
+    persona_name = persona_data.get("name", persona_id)
+    facts_str = "\n".join(
+        f"- [{m.get('source','').split('|',1)[-1]}] {m['fact']}" for m in recent
+    )
+    prompt = (
+        f"És {persona_name}. Estas são as tuas últimas aprendizagens:\n\n{facts_str}\n\n"
+        f"Faz uma síntese coerente em 3-5 frases do que aprendeste recentemente. "
+        f"Identifica os temas principais, conexões entre eles e o mais fascinante. "
+        f"Usa a tua voz e personalidade. Não listes factos — sintetiza com perspectiva."
+    )
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(
+            f"{LM_STUDIO_URL}/v1/chat/completions",
+            json={"model": reasoning_model_id, "messages": [{"role": "user", "content": prompt}],
+                  "stream": False, "max_tokens": 400, "temperature": 0.7, "enable_thinking": False},
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+
+
+async def _compute_topic_edges(persona_id: str, persona_name: str, topics: list[str], reasoning_model_id: str):
+    """Usa o reasoning model para identificar relações entre tópicos e guarda em SQLite."""
+    if len(topics) < 2:
+        return
+    sample = topics[:20]
+    prompt = (
+        f"Estes são os tópicos que {persona_name} conhece: {', '.join(sample)}.\n\n"
+        f"Identifica os 6-8 pares de tópicos mais relacionados entre si (peso de 0.1 a 1.0).\n"
+        f"Responde APENAS com JSON: {{\"edges\": [[\"topico_a\", \"topico_b\", peso], ...]}}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                f"{LM_STUDIO_URL}/v1/chat/completions",
+                json={"model": reasoning_model_id, "messages": [{"role": "user", "content": prompt}],
+                      "stream": False, "max_tokens": 300, "temperature": 0.3, "enable_thinking": False},
+            )
+            raw = r.json()["choices"][0]["message"]["content"].strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        edges = json.loads(raw).get("edges", [])
+        delete_topic_edges(persona_id)
+        for edge in edges[:10]:
+            if len(edge) >= 2:
+                weight = float(edge[2]) if len(edge) > 2 else 0.5
+                upsert_topic_edge(persona_id, str(edge[0]), str(edge[1]), weight)
+    except Exception as e:
+        print(f"[DeepMind] compute_topic_edges falhou: {e}")
+
+
+async def _defrag_persona_memory(persona_id: str, reasoning_model_id: str) -> dict:
+    """Consolida factos por tópico e recalcula arestas com o reasoning model."""
+    from memory.lancedb_service import upsert_memory
+    persona_data = _load_persona_file(persona_id) or {}
+    persona_name = persona_data.get("name", persona_id)
+    all_mems = get_all_memories()
+    prefix = f"self_{persona_id}|"
+
+    by_topic: dict[str, list[dict]] = {}
+    for m in all_mems:
+        src = m.get("source", "")
+        if not src.startswith(prefix):
+            continue
+        topic = src[len(prefix):]
+        by_topic.setdefault(topic, []).append(m)
+
+    stats: dict = {"topics_processed": 0, "facts_before": sum(len(v) for v in by_topic.values()),
+                   "facts_after": 0, "contradictions_removed": 0, "topics": []}
+
+    for topic, facts in by_topic.items():
+        if len(facts) < 3:
+            stats["facts_after"] += len(facts)
+            continue
+        facts_str = "\n".join(f"- {f['fact']}" for f in facts)
+        prompt = (
+            f"Tens estes factos sobre '{topic}':\n{facts_str}\n\n"
+            f"1. Remove duplicados e factos muito semelhantes\n"
+            f"2. Remove contradições (mantém o mais recente/específico)\n"
+            f"3. Combina factos relacionados em afirmações densas\n"
+            f"4. Retém no máximo 3 factos essenciais\n\n"
+            f"Responde APENAS com JSON: {{\"facts\": [\"facto 1\", \"facto 2\", \"facto 3\"]}}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(
+                    f"{LM_STUDIO_URL}/v1/chat/completions",
+                    json={"model": reasoning_model_id, "messages": [{"role": "user", "content": prompt}],
+                          "stream": False, "max_tokens": 400, "temperature": 0.3, "enable_thinking": False},
+                )
+                raw = r.json()["choices"][0]["message"]["content"].strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            new_facts = json.loads(raw).get("facts", [])[:3]
+        except Exception:
+            stats["facts_after"] += len(facts)
+            continue
+
+        for m in facts:
+            delete_memory(m["id"])
+            delete_fact(m["id"])
+
+        ts = datetime.now(timezone.utc).isoformat()
+        for nf in new_facts:
+            upsert_memory(str(uuid.uuid4()), nf, source=f"self_{persona_id}|{topic}", timestamp=ts)
+
+        removed = len(facts) - len(new_facts)
+        stats["contradictions_removed"] += max(0, removed)
+        stats["facts_after"] += len(new_facts)
+        stats["topics_processed"] += 1
+        stats["topics"].append({"topic": topic, "before": len(facts), "after": len(new_facts)})
+
+    # recalcula arestas semanticamente após consolidar os factos
+    if len(by_topic) > 1:
+        centroids = get_topic_vectors(persona_id)
+        topics_list = list(centroids.keys())
+        THRESHOLD, MAX_NEIGHBORS = 0.62, 4
+        candidates = []
+        for i in range(len(topics_list)):
+            for j in range(i + 1, len(topics_list)):
+                sim = cosine_similarity(centroids[topics_list[i]], centroids[topics_list[j]])
+                if sim > THRESHOLD:
+                    candidates.append((sim, topics_list[i], topics_list[j]))
+        candidates.sort(reverse=True)
+        degree = {t: 0 for t in topics_list}
+        delete_topic_edges(persona_id)
+        for sim, ta, tb in candidates:
+            if degree[ta] < MAX_NEIGHBORS and degree[tb] < MAX_NEIGHBORS:
+                upsert_topic_edge(persona_id, ta, tb, round(sim, 3))
+                degree[ta] += 1
+                degree[tb] += 1
+
+    return stats
+
+
+# ── Deep Mind endpoints ───────────────────────────────────────────────────────
+
+class DeepMindConfigBody(BaseModel):
+    enabled: bool = False
+    reasoning_models: list[str] = []
+    auto_synth: bool = False
+    auto_synth_cycles: int = 10
+
+
+@app.get("/api/deep-mind/config/{persona_id}")
+async def get_deep_mind_config(persona_id: str):
+    config = DEEP_MIND_CONFIG.get(persona_id, {
+        "enabled": False, "reasoning_models": [], "auto_synth": False, "auto_synth_cycles": 10,
+    })
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{LM_STUDIO_URL}/api/v0/models")
+            r.raise_for_status()
+            loaded_ids = {m["id"] for m in r.json().get("data", []) if m.get("state") == "loaded"}
+    except Exception:
+        loaded_ids = set()
+    configured = config.get("reasoning_models", [])
+    loaded_reasoning = [m for m in configured if m in loaded_ids]
+    return {**config, "loaded_reasoning_models": loaded_reasoning, "any_reasoning_loaded": len(loaded_reasoning) > 0}
+
+
+@app.post("/api/deep-mind/config/{persona_id}")
+async def set_deep_mind_config(persona_id: str, body: DeepMindConfigBody):
+    DEEP_MIND_CONFIG[persona_id] = body.model_dump()
+    auto_learner.deep_config[persona_id] = body.model_dump()
+    return {"ok": True}
+
+
+@app.post("/api/synthesize/{persona_id}")
+async def force_synthesize(persona_id: str):
+    config = DEEP_MIND_CONFIG.get(persona_id, {})
+    rm_id = await _get_loaded_reasoning_model(config.get("reasoning_models", []))
+    if not rm_id:
+        raise HTTPException(status_code=400, detail="Nenhum modelo reasoning carregado")
+    summary = await _synthesize_for_persona(persona_id, rm_id)
+    if not summary:
+        return {"ok": False, "detail": "Sem factos para sintetizar"}
+    persona_data = _load_persona_file(persona_id) or {}
+    auto_learner.timeline.insert(0, {
+        "persona": persona_data.get("name", persona_id),
+        "persona_id": persona_id,
+        "avatar": persona_data.get("avatar_url", ""),
+        "interest": "síntese",
+        "insights": [summary],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "discovery": False, "synthesis": False, "synthesis_report": True,
+    })
+    return {"ok": True, "summary": summary}
+
+
+@app.post("/api/defrag/{persona_id}")
+async def defrag_persona(persona_id: str):
+    config = DEEP_MIND_CONFIG.get(persona_id, {})
+    rm_id = await _get_loaded_reasoning_model(config.get("reasoning_models", []))
+    if not rm_id:
+        raise HTTPException(status_code=400, detail="Nenhum modelo reasoning carregado. Configura o Deep Mind primeiro.")
+    stats = await _defrag_persona_memory(persona_id, rm_id)
+    return {"ok": True, **stats}
+
+
+@app.get("/api/topic-edges/{persona_id}")
+def list_topic_edges(persona_id: str):
+    return get_topic_edges(persona_id)
+
+
+@app.post("/api/topic-edges/{persona_id}/compute")
+async def compute_topic_edges_semantic(persona_id: str):
+    """Calcula arestas por similaridade semântica (centróides LanceDB). Sem LLM."""
+    centroids = get_topic_vectors(persona_id)
+    if len(centroids) < 2:
+        return []
+    topics = list(centroids.keys())
+    THRESHOLD = 0.62   # só relações genuínas (all-MiniLM satura cedo em textos temáticos)
+    MAX_NEIGHBORS = 4  # max ligações por nó → evita teia densa
+
+    # calcula todos os pares acima do threshold
+    candidates: list[tuple[float, str, str]] = []
+    for i in range(len(topics)):
+        for j in range(i + 1, len(topics)):
+            sim = cosine_similarity(centroids[topics[i]], centroids[topics[j]])
+            if sim > THRESHOLD:
+                candidates.append((sim, topics[i], topics[j]))
+    candidates.sort(reverse=True)
+
+    # greedy: adiciona aresta só se nenhum dos dois nós já atingiu MAX_NEIGHBORS
+    degree: dict[str, int] = {t: 0 for t in topics}
+    edges = []
+    delete_topic_edges(persona_id)
+    for sim, ta, tb in candidates:
+        if degree[ta] < MAX_NEIGHBORS and degree[tb] < MAX_NEIGHBORS:
+            w = round(sim, 3)
+            upsert_topic_edge(persona_id, ta, tb, w)
+            edges.append({"topic_a": ta, "topic_b": tb, "weight": w})
+            degree[ta] += 1
+            degree[tb] += 1
+
+    return edges
 
 
 # --- Research channels: uma queue por session_id activo ---
@@ -1007,6 +1379,58 @@ def update_persona_config(persona_id: str, body: PersonaConfigUpdate):
     return {"ok": True}
 
 
+@app.get("/api/system/stats")
+async def system_stats():
+    import psutil, subprocess, re
+    m = psutil.virtual_memory()
+    s = psutil.swap_memory()
+
+    # vm_stat para pressão real de memória (macOS)
+    pressure_pct = m.percent
+    try:
+        vm = subprocess.check_output(["vm_stat"], timeout=2).decode()
+        page = 16384
+        def _pg(key):
+            match = re.search(rf"{key}:\s+(\d+)", vm)
+            return int(match.group(1)) * page if match else 0
+        used_real = _pg("Pages wired down") + _pg("Pages active") + _pg("Pages occupied by compressor")
+        if used_real > 0:
+            pressure_pct = round(used_real / m.total * 100, 1)
+    except Exception:
+        pass
+
+    # modelos carregados + info do LM Studio
+    loaded_models = []
+    try:
+        async with httpx.AsyncClient(timeout=4) as client:
+            r = await client.get(f"{LM_STUDIO_URL}/api/v0/models")
+            r.raise_for_status()
+            for mod in r.json().get("data", []):
+                if mod.get("state") == "loaded":
+                    loaded_models.append({
+                        "id": mod["id"],
+                        "quantization": mod.get("quantization", ""),
+                        "context": mod.get("loaded_context_length", 0),
+                    })
+    except Exception:
+        pass
+
+    return {
+        "ram": {
+            "total_gb": round(m.total / 1024**3, 1),
+            "used_gb":  round(m.used  / 1024**3, 1),
+            "free_gb":  round(m.available / 1024**3, 1),
+            "percent":  pressure_pct,
+        },
+        "swap": {
+            "used_gb":  round(s.used  / 1024**3, 1),
+            "total_gb": round(s.total / 1024**3, 1),
+            "percent":  s.percent,
+        },
+        "loaded_models": loaded_models,
+    }
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -1041,6 +1465,11 @@ async def autolearn_config(body: AutoLearnConfig):
     auto_learner.interval = max(30, body.interval)
     auto_learner.max_cycles = body.max_cycles
     return {"ok": True}
+
+
+@app.get("/api/autolearn/history")
+def autolearn_history(persona_id: str | None = None, limit: int = 300):
+    return get_learner_history(persona_id=persona_id, limit=limit)
 
 
 @app.get("/api/autolearn/status")

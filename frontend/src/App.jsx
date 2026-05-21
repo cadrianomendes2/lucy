@@ -242,14 +242,30 @@ function QuadrantCard({ stat, label, header, children, style }) {
 
 // ── Modelos disponíveis (espelho do backend) ────────────────────────────────
 
+// Tier por estVram: < 7 low | 7-15 medium | 15-21 high | 21-32 max | > 32 capped
+function vramTier(gb) {
+  if (gb < 7)  return 'low'
+  if (gb < 15) return 'medium'
+  if (gb < 21) return 'high'
+  if (gb <= 32) return 'max'
+  return 'capped'
+}
+
+const TIER_STYLE = {
+  low:    { label: 'Low',    bg: 'rgba(34,197,94,0.12)',  color: '#16a34a' },
+  medium: { label: 'Medium', bg: 'rgba(234,179,8,0.14)',  color: '#a16207' },
+  high:   { label: 'High',   bg: 'rgba(234,88,12,0.12)',  color: '#c2410c' },
+  max:    { label: 'Max',    bg: 'rgba(239,68,68,0.12)',  color: '#dc2626' },
+  capped: { label: 'Capped', bg: 'rgba(15,23,42,0.10)',   color: '#0f172a' },
+}
+
 const ALL_MODELS = [
-  { key: 'gemma-lite',   label: 'Gemma E4B',      sub: '7.5B · Fast' },
-  { key: 'nemo-12b',     label: 'Nemo Roleplay',   sub: '12B · PT' },
-  { key: 'gemma-26b',    label: 'Gemma 26B',       sub: '26B' },
-  { key: 'qwen-9b',      label: 'Qwen3.5 9B',      sub: '9B · Reasoning' },
-  { key: 'qwen-27b',     label: 'Qwen3.5 27B',     sub: '27B · Reasoning' },
-  { key: 'qwen-40b',     label: 'Qwen3.6 40B',     sub: '40B · Reasoning' },
-]
+  { key: 'gemma-lite',   label: 'Gemma 4 E4B',  sub: '7.5B · PT',      category: 'chat',      estVram: 3  },
+  { key: 'qwen-9b-auto', label: 'Qwen3.5',      sub: '9B · thinking',   category: 'reasoning', estVram: 6  },
+  { key: 'nemo-12b',     label: 'Nemo Roleplay', sub: '12B · PT',        category: 'chat',      estVram: 8  },
+  { key: 'gemma-26b',    label: 'Gemma 4 26B',  sub: '26B',              category: 'chat',      estVram: 16 },
+  { key: 'qwen-40b',     label: 'Qwen3.6',      sub: '40B · thinking',   category: 'reasoning', estVram: 25 },
+].map(m => ({ ...m, tier: vramTier(m.estVram) }))
 
 const ALL_VOICES = [
   { uuid: '7a33e74f', label: 'Vanessa', lang: 'pt-BR' },
@@ -271,20 +287,29 @@ function ProfilePage() {
   const [saved, setSaved] = useState(false)
   const [newInterest, setNewInterest] = useState('')
   const [editingUser, setEditingUser] = useState(false)
-  const [userName, setUserName] = useState('Adriano')
+  const [userName, setUserName] = useState(() => localStorage.getItem('user_name') || 'Adriano')
   const [userInterests, setUserInterests] = useState(() => {
     try { return JSON.parse(localStorage.getItem('user_interests') || '[]') } catch { return [] }
   })
   const [newUserInterest, setNewUserInterest] = useState('')
-  const [userPhoto, setUserPhoto] = useState(null)
+  const [photoTs, setPhotoTs] = useState(Date.now())
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [loadedModels, setLoadedModels] = useState([])
+  const [sysStats, setSysStats] = useState(null)
   const [playingVoice, setPlayingVoice] = useState(null)
   const photoInputRef = useRef(null)
+  const statsIntervalRef = useRef(null)
 
   useEffect(() => {
     fetch('/api/personas').then(r => r.json()).then(d => setPersonas(Array.isArray(d) ? d : [])).catch(() => {})
     fetch('/api/lm-models').then(r => r.json()).then(d => setLoadedModels(d.loaded || [])).catch(() => {})
+    fetch('/api/reasoning-models/init', { method: 'POST' }).catch(() => {})
+    // refresca o avatar quando volta a este painel
+    setPhotoTs(Date.now())
+    const fetchStats = () => fetch('/api/system/stats').then(r => r.json()).then(setSysStats).catch(() => {})
+    fetchStats()
+    statsIntervalRef.current = setInterval(fetchStats, 3000)
+    return () => clearInterval(statsIntervalRef.current)
     // carrega foto actual do servidor
     fetch('/avatars/user-photo.jpg?t=' + Date.now())
       .then(r => { if (r.ok) setUserPhoto('/avatars/user-photo.jpg?t=' + Date.now()) })
@@ -368,6 +393,7 @@ function ProfilePage() {
   }
 
   function saveUserInfo() {
+    localStorage.setItem('user_name', userName)
     localStorage.setItem('user_interests', JSON.stringify(userInterests))
     setEditingUser(false)
   }
@@ -376,16 +402,14 @@ function ProfilePage() {
     const file = e.target.files?.[0]
     if (!file) return
     setUploadingPhoto(true)
-    const reader = new FileReader()
-    reader.onload = ev => setUserPhoto(ev.target.result)
-    reader.readAsDataURL(file)
     try {
       const form = new FormData()
       form.append('file', file)
       await fetch('/api/user/photo', { method: 'POST', body: form })
+      const ts = Date.now()
+      setPhotoTs(ts)
+      window.dispatchEvent(new CustomEvent('user-photo-updated', { detail: ts }))
     } catch {}
-    // notifica o rail para recarregar (mesmo que upload falhe, refresca preview)
-    window.dispatchEvent(new CustomEvent('user-photo-updated'))
     setUploadingPhoto(false)
   }
 
@@ -417,8 +441,15 @@ function ProfilePage() {
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
           {/* Avatar */}
           <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => photoInputRef.current?.click()}>
-            <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--surface2)', border: '2px solid var(--border)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-              {userPhoto ? <img src={userPhoto} alt="Foto" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <IconPerson />}
+            <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--surface2)', border: '2px solid var(--border)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', position: 'relative' }}>
+              <IconPerson />
+              <img
+                src={`/avatars/user-photo.jpg?t=${photoTs}`}
+                alt="Foto"
+                onError={e => { e.target.style.display = 'none' }}
+                onLoad={e => { e.target.style.display = 'block' }}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
             </div>
             <div style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', background: uploadingPhoto ? 'var(--border)' : 'var(--accent)', border: '2px solid #fff', color: '#fff', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {uploadingPhoto ? '…' : '+'}
@@ -600,23 +631,34 @@ function ProfilePage() {
 
               {/* ── Modelos ── */}
               <div style={{ padding: '12px 16px 8px', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Modelos</div>
-                {ALL_MODELS.map(m => {
-                  const isLoaded = loadedModels.includes(m.key)
+                {['chat', 'reasoning'].map(cat => {
+                  const models = [...ALL_MODELS.filter(m => m.category === cat)].sort((a, b) => a.estVram - b.estVram)
                   return (
-                    <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: isLoaded ? '#25d366' : 'var(--border)', flexShrink: 0, boxShadow: isLoaded ? '0 0 4px #25d36688' : 'none' }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{m.label}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{m.sub}</div>
+                    <div key={cat} style={{ marginBottom: cat === 'chat' ? 14 : 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {cat === 'chat' ? 'Chat' : 'Reasoning'}
+                        {cat === 'reasoning' && <span style={{ fontSize: 9, color: '#7c3aed', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· Deep Mind</span>}
                       </div>
-                      {isLoaded && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: 'rgba(37,211,102,0.1)', color: '#25d366', fontWeight: 700 }}>activo</span>}
+                      {models.map(m => {
+                        const isLoaded = loadedModels.includes(m.key)
+                        const tier = TIER_STYLE[m.tier]
+                        return (
+                          <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)', opacity: m.tier === 'capped' ? 0.4 : 1 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: isLoaded ? '#25d366' : 'var(--border)', boxShadow: isLoaded ? '0 0 5px #25d36680' : 'none' }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{m.label}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{m.sub}</div>
+                            </div>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>~{m.estVram}GB</span>
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 8, background: tier.bg, color: tier.color, flexShrink: 0, minWidth: 42, textAlign: 'center' }}>
+                              {tier.label}
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                   )
                 })}
-                <button style={{ width: '100%', marginTop: 10, padding: '7px 0', borderRadius: 8, border: '1px dashed var(--border)', background: 'none', color: 'var(--text-muted)', fontSize: 11, cursor: 'not-allowed', opacity: 0.6 }}>
-                  + Gerir modelos (em breve)
-                </button>
               </div>
 
               {/* ── Vozes ── */}
@@ -646,22 +688,77 @@ function ProfilePage() {
                 </button>
               </div>
 
-              {/* ── Hardware ── */}
+              {/* ── Memória ── */}
               <div style={{ padding: '12px 16px 8px' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Hardware</div>
-                {[
-                  { icon: '🎤', label: 'Microfone', sub: 'Entrada de áudio' },
-                  { icon: '📷', label: 'Câmara', sub: 'Vídeo em tempo real' },
-                ].map(hw => (
-                  <div key={hw.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)', opacity: 0.45 }}>
-                    <span style={{ fontSize: 18 }}>{hw.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{hw.label}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{hw.sub}</div>
-                    </div>
-                    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, background: 'var(--surface2)', color: 'var(--text-muted)', fontWeight: 600 }}>em breve</span>
-                  </div>
-                ))}
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Memória</div>
+                {sysStats ? (() => {
+                  const { ram, swap } = sysStats
+                  const pct = ram.percent
+                  const barColor = pct < 70 ? '#25d366' : pct < 85 ? '#f59e0b' : '#ef4444'
+                  const swapPct = swap.percent
+                  return (
+                    <>
+                      {/* RAM bar */}
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>RAM Unificada</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: barColor }}>{ram.used_gb} / {ram.total_gb} GB</span>
+                        </div>
+                        <div style={{ height: 7, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: barColor, borderRadius: 4, transition: 'width 0.5s ease' }} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
+                          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{pct.toFixed(0)}% em uso</span>
+                          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ram.free_gb} GB livre</span>
+                        </div>
+                      </div>
+
+                      {/* Swap bar */}
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>Swap</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: swapPct > 60 ? '#ef4444' : 'var(--text-muted)' }}>
+                            {swap.used_gb} / {swap.total_gb} GB
+                          </span>
+                        </div>
+                        <div style={{ height: 5, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(swapPct, 100)}%`, background: swapPct > 60 ? '#ef4444' : '#94a3b8', borderRadius: 4, transition: 'width 0.5s ease' }} />
+                        </div>
+                        {swap.used_gb > 2 && (
+                          <div style={{ fontSize: 9, color: '#ef4444', marginTop: 3 }}>⚠ swap activo — memória sob pressão</div>
+                        )}
+                      </div>
+
+                      {/* Modelos carregados e estimativa */}
+                      {sysStats.loaded_models?.length > 0 && (
+                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
+                            Modelos em memória
+                          </div>
+                          {sysStats.loaded_models.map(lm => {
+                            const meta = ALL_MODELS.find(m => Object.values({
+                              'nemo-12b': 'nemo_roleplay_ptbr_new-i1',
+                              'gemma-lite': 'gemma-4-e4b-it-ultra-uncensored-heretic',
+                              'gemma-26b': 'gemma-4-26b-a4b-it',
+                              'qwen-9b-auto': 'qwen3.5-9b-claude-4.6-os-auto-variable-heretic-uncensored-thinking-max-neocode-imatrix',
+                              'qwen-40b': 'qwen3.6-40b-claude-4.6-opus-deckard-heretic-uncensored-thinking-neo-code-di-imatrix-max',
+                            })[m.key] === lm.id)
+                            return (
+                              <div key={lm.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#25d366', flexShrink: 0 }} />
+                                <span style={{ fontSize: 11, color: 'var(--text)', flex: 1 }}>{meta?.label || lm.id.split('-')[0]}</span>
+                                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{lm.quantization}</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed' }}>~{meta?.estVram || '?'}GB</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )
+                })() : (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>A carregar…</div>
+                )}
               </div>
 
             </div>
@@ -1371,49 +1468,113 @@ function ChatPage({
 
 // Gera nós e ligações do grafo para uma persona
 // Gera nós e links a partir de tópicos aprendidos (do LanceDB)
-function buildLiveGraph(persona, learnedTopics) {
-  const cx = 50, cy = 50
-  const colors = ['#00a884', '#25d366', '#4ade80', '#16a34a', '#34d399', '#86efac', '#059669', '#10b981']
-  const maxStrength = Math.max(1, ...learnedTopics.map(t => t.strength || 1))
+// Reordena tópicos para que os conectados fiquem adjacentes no anel (reduz cruzamentos)
+function reorderByConnectivity(topics, edges) {
+  if (topics.length < 3 || edges.length === 0) return topics
+  const adj = {}
+  topics.forEach(t => { adj[t] = {} })
+  edges.forEach(e => {
+    if (adj[e.topic_a] !== undefined && adj[e.topic_b] !== undefined) {
+      adj[e.topic_a][e.topic_b] = e.weight
+      adj[e.topic_b][e.topic_a] = e.weight
+    }
+  })
+  const ordered = [topics[0]]
+  const remaining = new Set(topics.slice(1))
+  while (remaining.size > 0) {
+    const last = ordered[ordered.length - 1]
+    let bestNext = null, bestScore = -1
+    for (const t of remaining) {
+      const score = adj[last]?.[t] || 0
+      if (score > bestScore) { bestScore = score; bestNext = t }
+    }
+    if (!bestNext) bestNext = remaining.values().next().value
+    ordered.push(bestNext)
+    remaining.delete(bestNext)
+  }
+  return ordered
+}
 
-  const fixedInterests = (persona?.interests || [])
+function buildLiveGraph(persona, learnedTopics, topicEdges = []) {
+  const cx = 50, cy = 50
+  const COLORS_STRONG = ['#00a884', '#059669', '#16a34a', '#0d9488', '#0284c7', '#7c3aed', '#db2777', '#ea580c']
+  const COLORS_WEAK   = ['#6ee7b7', '#a7f3d0', '#99f6e4', '#bae6fd', '#ddd6fe', '#fbcfe8', '#fed7aa', '#fde68a']
+
+  const fixedInterests = persona?.interests || []
   const learnedMap = Object.fromEntries(learnedTopics.map(t => [t.interest, t]))
-  // inclui todos os tópicos excepto os muito fracos (strength < 0.3 = quase apagados)
   const activeLearned = learnedTopics.filter(t => (t.strength || 1) >= 0.3)
   const allTopics = [...new Set([...fixedInterests, ...activeLearned.map(t => t.interest)])]
 
-  if (allTopics.length === 0) return { nodes: [{ id: '__persona__', label: persona?.name || '?', x: cx, y: cy, r: 15, color: '#00a884', central: true }], links: [] }
-
-  const r1 = allTopics.length <= 4 ? 30 : allTopics.length <= 8 ? 32 : 35
-  const nodes = [
-    { id: '__persona__', label: persona?.name || '?', x: cx, y: cy, r: 15, color: '#00a884', central: true },
-    ...allTopics.map((topic, i) => {
-      const angle = (2 * Math.PI * i) / allTopics.length - Math.PI / 2
-      const topicData = learnedMap[topic]
-      const strength = topicData?.strength || 0
-      const isFixed = fixedInterests.includes(topic)
-      const isWeak = strength > 0 && strength < 1.5  // reforçado poucas vezes
-      // raio proporcional à força (mín 6, máx 14)
-      const r = strength > 0 ? Math.min(14, 6 + Math.round((strength / maxStrength) * 8)) : (isFixed ? 8 : 6)
-      return {
-        id: `t_${i}`,
-        label: topic,
-        x: cx + r1 * Math.cos(angle),
-        y: cy + r1 * Math.sin(angle),
-        r,
-        color: colors[i % colors.length],
-        strength,
-        factCount: topicData?.count || 0,
-        isFixed,
-        isWeak,
-      }
-    }),
-  ]
-
-  const links = allTopics.map((_, i) => ['__persona__', `t_${i}`])
-  if (allTopics.length > 2) {
-    allTopics.forEach((_, i) => links.push([`t_${i}`, `t_${(i + 1) % allTopics.length}`]))
+  if (allTopics.length === 0) {
+    return { nodes: [{ id: '__persona__', label: persona?.name || '?', x: cx, y: cy, r: 16, color: '#00a884', central: true }], links: [] }
   }
+
+  const maxStrength = Math.max(1, ...learnedTopics.map(t => t.strength || 1))
+
+  // Separa tópicos fortes (anel interior) e fracos (anel exterior)
+  const strong = allTopics.filter(t => {
+    const s = learnedMap[t]?.strength || 0
+    return fixedInterests.includes(t) || s >= 2.0
+  })
+  const weak = allTopics.filter(t => !strong.includes(t))
+
+  // Reordena cada anel por conectividade
+  const orderedStrong = reorderByConnectivity(strong, topicEdges)
+  const orderedWeak   = reorderByConnectivity(weak,   topicEdges)
+
+  const R_INNER = strong.length <= 6 ? 28 : 32
+  const R_OUTER = weak.length <= 6 ? 40 : 44
+
+  const nodes = [{ id: '__persona__', label: persona?.name || '?', x: cx, y: cy, r: 16, color: '#00a884', central: true }]
+
+  orderedStrong.forEach((topic, i) => {
+    const angle = (2 * Math.PI * i) / orderedStrong.length - Math.PI / 2
+    const topicData = learnedMap[topic]
+    const strength = topicData?.strength || 0
+    const isFixed = fixedInterests.includes(topic)
+    const r = strength > 0 ? Math.min(13, 7 + Math.round((strength / maxStrength) * 6)) : 9
+    nodes.push({
+      id: `s_${i}`, label: topic,
+      x: cx + R_INNER * Math.cos(angle),
+      y: cy + R_INNER * Math.sin(angle),
+      r, color: COLORS_STRONG[i % COLORS_STRONG.length],
+      strength, factCount: topicData?.count || 0,
+      isFixed, isWeak: false, ring: 'inner',
+    })
+  })
+
+  orderedWeak.forEach((topic, i) => {
+    const angle = (2 * Math.PI * i) / orderedWeak.length - Math.PI / 2
+    const topicData = learnedMap[topic]
+    const strength = topicData?.strength || 0
+    const isWeak = strength > 0 && strength < 1.5
+    const r = strength > 0 ? Math.min(10, 5 + Math.round((strength / maxStrength) * 5)) : 6
+    nodes.push({
+      id: `w_${i}`, label: topic,
+      x: cx + R_OUTER * Math.cos(angle),
+      y: cy + R_OUTER * Math.sin(angle),
+      r, color: COLORS_WEAK[i % COLORS_WEAK.length],
+      strength, factCount: topicData?.count || 0,
+      isFixed: fixedInterests.includes(topic), isWeak, ring: 'outer',
+    })
+  })
+
+  // Linhas do centro apenas para nós do anel interno; externas ligam ao nó interno mais próximo
+  const links = []
+  nodes.filter(n => n.ring === 'inner').forEach(n => links.push(['__persona__', n.id]))
+  nodes.filter(n => n.ring === 'outer').forEach(on => {
+    // liga ao nó interno mais próximo (por ângulo)
+    const innerNodes = nodes.filter(n => n.ring === 'inner')
+    if (innerNodes.length > 0) {
+      const closest = innerNodes.reduce((best, n) => {
+        const d = Math.hypot(n.x - on.x, n.y - on.y)
+        return d < best.d ? { n, d } : best
+      }, { n: innerNodes[0], d: Infinity })
+      links.push([closest.n.id, on.id])
+    } else {
+      links.push(['__persona__', on.id])
+    }
+  })
 
   return { nodes, links }
 }
@@ -1423,12 +1584,11 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
   const svgRef = useRef(null)
   const [dims, setDims] = useState({ w: 400, h: 400 })
   const [learnedTopics, setLearnedTopics] = useState([])
+  const [topicEdges, setTopicEdges] = useState([])
 
-  // actualiza a cada 10s
   useEffect(() => {
     if (!persona?.id) return
     function fetchTopics() {
-      // usa /api/topics que tem força + ciclos (mais rico que apenas contagem de factos)
       fetch(`/api/topics/${persona.id}`)
         .then(r => r.json())
         .then(d => setLearnedTopics(Array.isArray(d) ? d.map(t => ({
@@ -1439,9 +1599,25 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
         })) : []))
         .catch(() => {})
     }
+    function fetchEdges() {
+      fetch(`/api/topic-edges/${persona.id}`)
+        .then(r => r.json())
+        .then(d => setTopicEdges(Array.isArray(d) ? d : []))
+        .catch(() => {})
+    }
+    // computa arestas semanticamente quando a persona muda (sem LLM)
+    function computeEdges() {
+      fetch(`/api/topic-edges/${persona.id}/compute`, { method: 'POST' })
+        .then(r => r.json())
+        .then(d => setTopicEdges(Array.isArray(d) ? d : []))
+        .catch(() => {})
+    }
     fetchTopics()
+    fetchEdges()
+    // computa após pequeno delay (dá tempo aos tópicos de carregar)
+    const computeTimer = setTimeout(computeEdges, 1500)
     const id = setInterval(fetchTopics, 10000)
-    return () => clearInterval(id)
+    return () => { clearInterval(id); clearTimeout(computeTimer) }
   }, [persona?.id])
 
   useEffect(() => {
@@ -1452,22 +1628,36 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
     return () => obs.disconnect()
   }, [])
 
-  const { nodes, links } = buildLiveGraph(persona, learnedTopics)
+  const { nodes, links } = buildLiveGraph(persona, learnedTopics, topicEdges)
   const px = (pct) => (pct / 100) * dims.w
   const py = (pct) => (pct / 100) * dims.h
   const totalFacts = learnedTopics.reduce((s, t) => s + t.count, 0)
 
   return (
     <svg ref={svgRef} width="100%" height="100%" style={{ display: 'block', flex: 1 }}>
-      {/* Legenda */}
-      <text x={8} y={16} fontSize={9} fill="#9ca3af">● interesses fixos  ◉ tamanho = factos aprendidos ({totalFacts} total)</text>
+      <text x={8} y={16} fontSize={9} fill="#9ca3af">
+        ● anel interno = forte/fixo  ○ anel externo = descoberto  — linha roxa = relacionado ({totalFacts} factos)
+      </text>
 
+      {/* Linhas estruturais (centro→nó, nó→nó hierárquico) */}
       {links.map(([a, b], i) => {
         const na = nodes.find(n => n.id === a)
         const nb = nodes.find(n => n.id === b)
         if (!na || !nb) return null
         const isToCenter = a === '__persona__' || b === '__persona__'
-        return <line key={i} x1={px(na.x)} y1={py(na.y)} x2={px(nb.x)} y2={py(nb.y)} stroke="#c8e6d8" strokeWidth={isToCenter ? 1.5 : 0.8} strokeOpacity={0.6} />
+        return <line key={i} x1={px(na.x)} y1={py(na.y)} x2={px(nb.x)} y2={py(nb.y)}
+          stroke={isToCenter ? '#c8e6d8' : '#e5e7eb'} strokeWidth={isToCenter ? 1.5 : 0.8} strokeOpacity={isToCenter ? 0.7 : 0.5} />
+      })}
+
+      {/* Arestas semânticas (relações reais entre tópicos) */}
+      {topicEdges.map((edge, i) => {
+        const na = nodes.find(n => n.label === edge.topic_a)
+        const nb = nodes.find(n => n.label === edge.topic_b)
+        if (!na || !nb) return null
+        const w = Math.max(0.3, Math.min(3, edge.weight * 4))
+        const opacity = 0.15 + edge.weight * 0.45
+        return <line key={`sem-${i}`} x1={px(na.x)} y1={py(na.y)} x2={px(nb.x)} y2={py(nb.y)}
+          stroke="#7c3aed" strokeWidth={w} strokeOpacity={opacity} strokeLinecap="round" />
       })}
 
       {nodes.map(node => {
@@ -1508,11 +1698,13 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
 function MindPage({ model, language }) {
   const [personas, setPersonas] = useState([])
   const [activePersona, setActivePersona] = useState(null)
-  const [activeModel, setActiveModel] = useState(model) // modelo validado contra LM Studio
+  const [activeModel, setActiveModel] = useState(model)
   const [selectedNode, setSelectedNode] = useState(null)
   const [messages, setMessages] = useState([])
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
+  const [defragging, setDefragging] = useState(false)
+  const [defragResult, setDefragResult] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -1572,6 +1764,24 @@ function MindPage({ model, language }) {
       setMessages(prev => { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], content: 'Erro ao gerar resumo.', streaming: false }; return u })
     }
     setLoading(false)
+  }
+
+  async function handleDefrag() {
+    if (!activePersona?.id || defragging) return
+    setDefragging(true)
+    setDefragResult(null)
+    try {
+      const r = await fetch(`/api/defrag/${activePersona.id}`, { method: 'POST' })
+      const d = await r.json()
+      if (!r.ok) {
+        setDefragResult({ error: d.detail || 'Erro ao desfragmentar' })
+      } else {
+        setDefragResult(d)
+      }
+    } catch {
+      setDefragResult({ error: 'Erro ao desfragmentar' })
+    }
+    setDefragging(false)
   }
 
   async function sendMessage() {
@@ -1658,11 +1868,29 @@ function MindPage({ model, language }) {
 
       {/* ── PAINEL 2: Grafo por persona ── */}
       <div style={{ flex: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f0fdf4' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', flex: 1 }}>
             Grafo · {activePersona?.name || '—'}
           </span>
-          <span style={{ fontSize: 11, color: 'var(--accent)' }}>actualiza a cada 10s</span>
+          {defragResult && !defragResult.error && (
+            <span style={{ fontSize: 10, color: '#7c3aed', background: 'rgba(124,58,237,0.08)', padding: '2px 8px', borderRadius: 8 }}>
+              ✓ {defragResult.topics_processed} tópicos · -{defragResult.contradictions_removed} factos
+            </span>
+          )}
+          {defragResult?.error && (
+            <span style={{ fontSize: 10, color: '#dc2626', background: 'rgba(220,38,38,0.08)', padding: '2px 8px', borderRadius: 8 }}>
+              ✗ {defragResult.error}
+            </span>
+          )}
+          <button
+            onClick={handleDefrag}
+            disabled={defragging || !activePersona}
+            title="Consolida factos, remove contradições e recalcula arestas entre tópicos (requer Deep Mind configurado)"
+            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'none', color: defragging ? 'var(--text-muted)' : '#7c3aed', cursor: defragging ? 'wait' : 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+          >
+            {defragging ? '⏳' : '⚙'} {defragging ? 'A desfragmentar…' : 'Desfragmentar'}
+          </button>
+          <span style={{ fontSize: 11, color: 'var(--accent)' }}>10s</span>
         </div>
         <div style={{ flex: 1, overflow: 'hidden', padding: 8, display: 'flex' }}>
           {activePersona && (
@@ -1889,10 +2117,18 @@ function LearnPage() {
   const [personas, setPersonas] = useState([])
   const [enabled, setEnabled] = useState({})
   const [interval, setIntervalMin] = useState(2)
-  const [maxCycles, setMaxCycles] = useState('')  // '' = ilimitado
+  const [maxCycles, setMaxCycles] = useState('')
   const [status, setStatus] = useState({ running: false, current: null, timeline: [] })
-  const [tab, setTab] = useState('feed') // 'feed' | 'timeline'
+  const [tab, setTab] = useState('feed')
+  const [history, setHistory] = useState([])
   const pollRef = useRef(null)
+
+  // Deep Mind state
+  const [deepMind, setDeepMind] = useState(false)
+  const [anyReasoningLoaded, setAnyReasoningLoaded] = useState(false)
+  const [autoSynth, setAutoSynth] = useState(false)
+  const [autoSynthCycles, setAutoSynthCycles] = useState(10)
+  const [synthesizing, setSynthesizing] = useState(false)
 
   useEffect(() => {
     fetch('/api/personas').then(r => r.json()).then(d => {
@@ -1903,7 +2139,41 @@ function LearnPage() {
       setEnabled(init)
     }).catch(() => {})
     fetchStatus()
+    checkLoadedIds()
   }, [])
+
+  async function checkLoadedIds() {
+    try {
+      const d = await fetch('/api/reasoning-models').then(r => r.json())
+      setAnyReasoningLoaded(Array.isArray(d) && d.some(m => m.loaded))
+    } catch {}
+  }
+
+  async function saveDmConfig(overrides = {}) {
+    const config = {
+      enabled: overrides.enabled ?? deepMind,
+      reasoning_models: [],  // geridos pelo sistema
+      auto_synth: overrides.auto_synth ?? autoSynth,
+      auto_synth_cycles: overrides.auto_synth_cycles ?? autoSynthCycles,
+    }
+    for (const p of personas) {
+      await fetch(`/api/deep-mind/config/${p.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      }).catch(() => {})
+    }
+  }
+
+  async function handleSynthesize() {
+    setSynthesizing(true)
+    const active = personas.filter(p => enabled[p.id])
+    for (const p of active) {
+      await fetch(`/api/synthesize/${p.id}`, { method: 'POST' }).catch(() => {})
+    }
+    setSynthesizing(false)
+    fetchStatus()
+  }
 
   async function fetchStatus() {
     try {
@@ -1914,10 +2184,23 @@ function LearnPage() {
     } catch {}
   }
 
+  async function fetchHistory() {
+    try {
+      const d = await fetch('/api/autolearn/history').then(r => r.json())
+      setHistory(Array.isArray(d) ? d : [])
+    } catch {}
+  }
+
   useEffect(() => {
-    pollRef.current = setInterval(fetchStatus, 3000)
+    fetchHistory()
+    pollRef.current = setInterval(() => { fetchStatus(); checkLoadedIds() }, 3000)
+    // atualiza histórico quando tab muda para timeline
     return () => clearInterval(pollRef.current)
   }, [])
+
+  useEffect(() => {
+    if (tab === 'timeline') fetchHistory()
+  }, [tab])
 
   async function toggle() {
     if (status.running) {
@@ -2029,6 +2312,64 @@ function LearnPage() {
               Actualizar configuração
             </button>
           )}
+
+          {/* ── Deep Mind ── */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: anyReasoningLoaded ? '#7c3aed' : 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', flex: 1 }}>
+                Deep Mind
+              </div>
+              <button
+                onClick={() => {
+                  if (!anyReasoningLoaded && !deepMind) return
+                  const next = !deepMind
+                  setDeepMind(next)
+                  saveDmConfig({ enabled: next })
+                }}
+                title={anyReasoningLoaded ? '' : 'Necessita de modelo reasoning ligado (Qwen3.5 ou Qwen3.6)'}
+                style={{ width: 34, height: 20, borderRadius: 10, border: 'none', background: deepMind && anyReasoningLoaded ? '#7c3aed' : 'var(--border)', cursor: anyReasoningLoaded ? 'pointer' : 'not-allowed', position: 'relative', transition: 'background 0.2s', flexShrink: 0, opacity: anyReasoningLoaded ? 1 : 0.5 }}
+              >
+                <div style={{ position: 'absolute', top: 2, left: deepMind && anyReasoningLoaded ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: 10, color: anyReasoningLoaded ? '#7c3aed' : 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
+              {anyReasoningLoaded ? '● Qwen reasoning disponível' : 'Necessita de Qwen3.5 ou Qwen3.6 ligado'}
+            </div>
+
+            {/* Auto Síntese + Sintetizar (só quando Deep Mind ON) */}
+            {deepMind && anyReasoningLoaded && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text)', flex: 1 }}>Auto Síntese</span>
+                  <button
+                    onClick={() => { const next = !autoSynth; setAutoSynth(next); saveDmConfig({ auto_synth: next }) }}
+                    style={{ width: 34, height: 20, borderRadius: 10, border: 'none', background: autoSynth ? '#7c3aed' : 'var(--border)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                  >
+                    <div style={{ position: 'absolute', top: 2, left: autoSynth ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+                  </button>
+                </div>
+                {autoSynth && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>a cada</span>
+                    <input
+                      type="number" min={1} max={100} value={autoSynthCycles}
+                      onChange={e => { const v = Number(e.target.value); setAutoSynthCycles(v); saveDmConfig({ auto_synth_cycles: v }) }}
+                      style={{ width: 48, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11, textAlign: 'center', outline: 'none' }}
+                    />
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>ciclos</span>
+                  </div>
+                )}
+                <button
+                  onClick={handleSynthesize}
+                  disabled={synthesizing}
+                  style={{ padding: '8px 0', borderRadius: 10, border: '1px solid #7c3aed', background: synthesizing ? 'var(--surface2)' : 'rgba(124,58,237,0.08)', color: '#7c3aed', fontSize: 12, fontWeight: 600, cursor: synthesizing ? 'wait' : 'pointer' }}
+                >
+                  {synthesizing ? '⏳ A sintetizar…' : '🧠 Sintetizar'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -2076,56 +2417,106 @@ function LearnPage() {
             )}
             {/* Últimas aprendizagens */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {status.timeline.slice(0, 8).map((entry, i) => (
-                <div key={i} style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: '50%', overflow: 'hidden', border: '1.5px solid var(--border)', flexShrink: 0 }}>
-                      <img src={entry.avatar || '/animations/idle.webp'} alt={entry.persona} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
+              {status.timeline.slice(0, 8).map((entry, i) => {
+                const isSynth = entry.synthesis_report
+                return (
+                  <div key={i} style={{ background: isSynth ? 'rgba(245,158,11,0.06)' : '#fff', border: `1px solid ${isSynth ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`, borderRadius: 12, padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', overflow: 'hidden', border: `1.5px solid ${isSynth ? 'rgba(245,158,11,0.5)' : 'var(--border)'}`, flexShrink: 0 }}>
+                        <img src={entry.avatar || '/animations/idle.webp'} alt={entry.persona} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{entry.persona}</span>
+                      <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 8, background: isSynth ? 'rgba(245,158,11,0.15)' : entry.synthesis ? 'rgba(59,130,246,0.12)' : entry.discovery ? 'rgba(139,92,246,0.12)' : 'rgba(0,168,132,0.1)', color: isSynth ? '#d97706' : entry.synthesis ? '#2563eb' : entry.discovery ? '#7c3aed' : 'var(--accent)' }}>
+                        {isSynth ? '🧠 síntese' : entry.synthesis ? '🔗 ' : entry.discovery ? '🔭 ' : ''}{isSynth ? '' : entry.interest}
+                      </span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{fmtTime(entry.timestamp)}</span>
                     </div>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{entry.persona}</span>
-                    <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 8, background: entry.synthesis ? 'rgba(59,130,246,0.12)' : entry.discovery ? 'rgba(139,92,246,0.12)' : 'rgba(0,168,132,0.1)', color: entry.synthesis ? '#2563eb' : entry.discovery ? '#7c3aed' : 'var(--accent)' }}>{entry.synthesis ? '🔗 ' : entry.discovery ? '🔭 ' : ''}{entry.interest}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{fmtTime(entry.timestamp)}</span>
+                    {(entry.insights || []).map((ins, j) => (
+                      <div key={j} style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.6, padding: '4px 0 4px 10px', borderLeft: `2px solid ${isSynth ? '#f59e0b' : 'var(--accent)'}`, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
+                        {ins}
+                      </div>
+                    ))}
                   </div>
-                  {(entry.insights || []).map((ins, j) => (
-                    <div key={j} style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, padding: '4px 0 4px 10px', borderLeft: '2px solid var(--accent)', marginBottom: 4 }}>
-                      {ins}
-                    </div>
-                  ))}
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         ) : (
-          /* Timeline */
+          /* Timeline — histórico persistente por dia */
           <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-            {status.timeline.length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, fontSize: 13 }}>Ainda sem aprendizagens registadas.</div>
+            {history.length === 0 && (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, fontSize: 13 }}>
+                Ainda sem histórico guardado.<br />As aprendizagens aparecem aqui após a próxima sessão.
+              </div>
             )}
-            <div style={{ position: 'relative' }}>
-              {/* Linha vertical */}
-              {status.timeline.length > 0 && <div style={{ position: 'absolute', left: 19, top: 0, bottom: 0, width: 2, background: 'var(--border)' }} />}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {status.timeline.map((entry, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', border: '2px solid var(--accent)', flexShrink: 0, zIndex: 1, background: '#fff' }}>
-                      <img src={entry.avatar || '/animations/idle.webp'} alt={entry.persona} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
-                    </div>
-                    <div style={{ flex: 1, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '10px 14px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{entry.persona}</span>
-                        <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 6, background: entry.synthesis ? 'rgba(59,130,246,0.12)' : entry.discovery ? 'rgba(139,92,246,0.12)' : 'rgba(0,168,132,0.1)', color: entry.synthesis ? '#2563eb' : entry.discovery ? '#7c3aed' : 'var(--accent)' }}>{entry.synthesis ? '🔗 ' : entry.discovery ? '🔭 ' : ''}{entry.interest}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{fmtTime(entry.timestamp)}</span>
-                      </div>
-                      {(entry.insights || []).map((ins, j) => (
-                        <div key={j} style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, borderLeft: '2px solid rgba(0,168,132,0.4)', paddingLeft: 8, marginBottom: 4 }}>
-                          {ins}
-                        </div>
-                      ))}
+            {(() => {
+              // agrupa por dia
+              const byDay = {}
+              history.forEach(e => {
+                const day = e.timestamp ? e.timestamp.slice(0, 10) : 'desconhecido'
+                byDay[day] = byDay[day] || []
+                byDay[day].push(e)
+              })
+              const days = Object.keys(byDay).sort((a, b) => b.localeCompare(a))
+
+              function fmtDay(iso) {
+                if (!iso || iso === 'desconhecido') return iso
+                try {
+                  const d = new Date(iso + 'T12:00:00')
+                  const today = new Date()
+                  const yesterday = new Date(); yesterday.setDate(today.getDate() - 1)
+                  if (iso === today.toISOString().slice(0, 10)) return 'Hoje'
+                  if (iso === yesterday.toISOString().slice(0, 10)) return 'Ontem'
+                  return d.toLocaleDateString('pt', { weekday: 'long', day: 'numeric', month: 'long' })
+                } catch { return iso }
+              }
+
+              return days.map(day => (
+                <div key={day} style={{ marginBottom: 28 }}>
+                  {/* Separador de dia */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <div style={{ height: 1, flex: 1, background: 'var(--border)' }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+                      {fmtDay(day)} · {byDay[day].length} aprendizagens
+                    </span>
+                    <div style={{ height: 1, flex: 1, background: 'var(--border)' }} />
+                  </div>
+
+                  {/* Entradas do dia */}
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ position: 'absolute', left: 19, top: 0, bottom: 0, width: 2, background: 'var(--border)' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {byDay[day].map((entry, i) => {
+                        const isSynth = entry.synthesis_report
+                        return (
+                          <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                            <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${isSynth ? '#f59e0b' : 'var(--accent)'}`, flexShrink: 0, zIndex: 1, background: '#fff' }}>
+                              <img src={entry.avatar || '/animations/idle.webp'} alt={entry.persona} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
+                            </div>
+                            <div style={{ flex: 1, background: isSynth ? 'rgba(245,158,11,0.05)' : '#fff', border: `1px solid ${isSynth ? 'rgba(245,158,11,0.35)' : 'var(--border)'}`, borderRadius: 10, padding: '9px 12px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{entry.persona}</span>
+                                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 6,
+                                  background: isSynth ? 'rgba(245,158,11,0.15)' : entry.synthesis ? 'rgba(59,130,246,0.12)' : entry.discovery ? 'rgba(139,92,246,0.12)' : 'rgba(0,168,132,0.1)',
+                                  color: isSynth ? '#d97706' : entry.synthesis ? '#2563eb' : entry.discovery ? '#7c3aed' : 'var(--accent)' }}>
+                                  {isSynth ? '🧠 síntese' : entry.synthesis ? '🔗 ' : entry.discovery ? '🔭 ' : ''}{isSynth ? '' : entry.interest}
+                                </span>
+                                <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{fmtTime(entry.timestamp)}</span>
+                              </div>
+                              {(entry.insights || []).map((ins, j) => (
+                                <div key={j} style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, borderLeft: `2px solid ${isSynth ? '#f59e0b' : 'rgba(0,168,132,0.4)'}`, paddingLeft: 8, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
+                                  {ins}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              ))
+            })()}
           </div>
         )}
       </div>
@@ -2186,7 +2577,8 @@ function SettingsPage() {
 // ── App root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage] = useState('chat') // 'profile'|'history'|'chat'|'mind'|'settings'
+  const [page, setPage] = useState(() => localStorage.getItem('last_page') || 'chat')
+  const [photoTs, setPhotoTs] = useState(Date.now())
 
   const [model, setModel] = useState('gemma-lite')
   const [thinkingMode, setThinkingMode] = useState('off')
@@ -2198,11 +2590,14 @@ export default function App() {
   const [sidebarKey, setSidebarKey] = useState(0)
   const [rightOpen, setRightOpen] = useState(window.innerWidth >= 1100)
   const [pro, setPro] = useState(false)
-  const [pinModal, setPinModal] = useState(null) // null | callback fn
+  const [pinModal, setPinModal] = useState(null)
   const [chatPersonas, setChatPersonas] = useState([])
   const [contactSelected, setContactSelected] = useState(false)
-  const [userPhoto, setUserPhoto] = useState(null)
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
+
+  function navigateTo(p) {
+    setPage(p)
+    localStorage.setItem('last_page', p)
+  }
 
   useEffect(() => {
     fetch('/api/personas').then(r => r.json()).then(d => setChatPersonas(Array.isArray(d) ? d : [])).catch(() => {})
@@ -2217,16 +2612,10 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // carrega foto do servidor (funciona em todos os browsers)
   useEffect(() => {
-    function loadPhoto() {
-      fetch('/avatars/user-photo.jpg?t=' + Date.now()).then(r => {
-        if (r.ok) setUserPhoto('/avatars/user-photo.jpg?t=' + Date.now())
-      }).catch(() => {})
-    }
-    loadPhoto()
-    window.addEventListener('user-photo-updated', loadPhoto)
-    return () => window.removeEventListener('user-photo-updated', loadPhoto)
+    function onPhotoUpdated(e) { setPhotoTs(e.detail || Date.now()) }
+    window.addEventListener('user-photo-updated', onPhotoUpdated)
+    return () => window.removeEventListener('user-photo-updated', onPhotoUpdated)
   }, [])
 
   useEffect(() => {
@@ -2332,65 +2721,39 @@ export default function App() {
         flexShrink: 0,
         zIndex: 10,
       }}>
-        <LucyLogo onClick={() => setPage('profile')} />
+        <LucyLogo onClick={() => navigateTo('profile')} />
 
         {NAV.map(({ id, title, icon }) => (
           <RailIcon
             key={id}
             active={page === id}
             title={title}
-            onClick={() => setPage(id)}
+            onClick={() => navigateTo(id)}
           >
             {icon}
           </RailIcon>
         ))}
 
-        {/* ── Avatar do utilizador no fundo do rail ── */}
-        <div style={{ marginTop: 'auto', position: 'relative' }}>
-          {userMenuOpen && (
-            <div
-              style={{
-                position: 'absolute', bottom: '110%', left: '50%', transform: 'translateX(-50%)',
-                background: '#fff', border: '1px solid var(--border)', borderRadius: 12,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '6px 0',
-                minWidth: 160, zIndex: 100,
-              }}
-              onMouseLeave={() => setUserMenuOpen(false)}
-            >
-              {[
-                { label: 'Trocar de utilizador', icon: '👤' },
-                { label: 'Sair', icon: '↩' },
-              ].map(item => (
-                <button
-                  key={item.label}
-                  onClick={() => setUserMenuOpen(false)}
-                  style={{
-                    width: '100%', padding: '9px 14px', background: 'none', border: 'none',
-                    textAlign: 'left', fontSize: 13, color: 'var(--text)', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                >
-                  <span style={{ fontSize: 15 }}>{item.icon}</span>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
+        {/* ── Avatar do utilizador no fundo do rail → vai para Perfil ── */}
+        <div style={{ marginTop: 'auto' }}>
           <button
-            onClick={() => setUserMenuOpen(v => !v)}
-            title="Utilizador"
+            onClick={() => navigateTo('profile')}
+            title="Perfil"
             style={{
-              width: 42, height: 42, borderRadius: '50%', border: '2px solid var(--accent)',
+              width: 42, height: 42, borderRadius: '50%', border: `2px solid ${page === 'profile' ? 'var(--accent)' : 'var(--border)'}`,
               overflow: 'hidden', cursor: 'pointer', padding: 0, background: 'var(--surface2)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+              position: 'relative', transition: 'border-color 0.15s',
             }}
           >
-            {userPhoto
-              ? <img src={userPhoto} alt="Utilizador" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <IconPerson />
-            }
+            <IconPerson />
+            <img
+              src={`/avatars/user-photo.jpg?t=${photoTs}`}
+              alt="Utilizador"
+              onError={e => { e.target.style.display = 'none' }}
+              onLoad={e => { e.target.style.display = 'block' }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
           </button>
         </div>
       </div>

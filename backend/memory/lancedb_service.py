@@ -116,6 +116,40 @@ def delete_memory(fact_id: str) -> None:
     table.delete(f"id = '{fact_id}'")
 
 
+def get_topic_vectors(persona_id: str) -> dict[str, list[float]]:
+    """Retorna o centróide (média dos embeddings) de cada tópico de uma persona."""
+    table = _get_table()
+    try:
+        df = table.to_pandas()
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+    prefix = f"self_{persona_id}|"
+    sub = df[df["source"].str.startswith(prefix, na=False)]
+    if sub.empty:
+        return {}
+    acc: dict[str, tuple[list[float], int]] = {}
+    for _, row in sub.iterrows():
+        topic = row["source"][len(prefix):]
+        vec = list(row["vector"])
+        if topic in acc:
+            prev, cnt = acc[topic]
+            acc[topic] = ([p + v for p, v in zip(prev, vec)], cnt + 1)
+        else:
+            acc[topic] = (vec, 1)
+    return {t: [v / c for v in vec_sum] for t, (vec_sum, c) in acc.items()}
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
 def wipe_all_memories() -> None:
     table = _get_table()
     try:

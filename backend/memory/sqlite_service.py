@@ -23,6 +23,26 @@ def init_db() -> None:
             created_at  TEXT NOT NULL,
             PRIMARY KEY (persona_id, topic)
         );
+        CREATE TABLE IF NOT EXISTS learner_log (
+            id             TEXT PRIMARY KEY,
+            persona_id     TEXT NOT NULL,
+            persona_name   TEXT,
+            avatar_url     TEXT,
+            interest       TEXT,
+            insights       TEXT,
+            timestamp      TEXT NOT NULL,
+            discovery      INTEGER DEFAULT 0,
+            synthesis      INTEGER DEFAULT 0,
+            synthesis_report INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS topic_edges (
+            persona_id  TEXT NOT NULL,
+            topic_a     TEXT NOT NULL,
+            topic_b     TEXT NOT NULL,
+            weight      REAL DEFAULT 1.0,
+            updated_at  TEXT NOT NULL,
+            PRIMARY KEY (persona_id, topic_a, topic_b)
+        );
         CREATE TABLE IF NOT EXISTS sessions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             title      TEXT NOT NULL DEFAULT 'Nova conversa',
@@ -202,6 +222,89 @@ def get_topics(persona_id: str) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def save_learner_entry(entry: dict) -> None:
+    import json as _json
+    conn = _connect()
+    conn.execute("""
+        INSERT OR IGNORE INTO learner_log
+            (id, persona_id, persona_name, avatar_url, interest, insights, timestamp, discovery, synthesis, synthesis_report)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        entry.get("id", _now()),
+        entry.get("persona_id", ""),
+        entry.get("persona", ""),
+        entry.get("avatar", ""),
+        entry.get("interest", ""),
+        _json.dumps(entry.get("insights", []), ensure_ascii=False),
+        entry.get("timestamp", _now()),
+        1 if entry.get("discovery") else 0,
+        1 if entry.get("synthesis") else 0,
+        1 if entry.get("synthesis_report") else 0,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_learner_history(persona_id: str | None = None, limit: int = 500) -> list[dict]:
+    import json as _json
+    conn = _connect()
+    if persona_id:
+        rows = conn.execute(
+            "SELECT * FROM learner_log WHERE persona_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (persona_id, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM learner_log ORDER BY timestamp DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["insights"] = _json.loads(d["insights"] or "[]")
+        except Exception:
+            d["insights"] = []
+        d["persona"] = d.pop("persona_name", "")
+        d["avatar"] = d.pop("avatar_url", "")
+        d["discovery"] = bool(d["discovery"])
+        d["synthesis"] = bool(d["synthesis"])
+        d["synthesis_report"] = bool(d["synthesis_report"])
+        result.append(d)
+    return result
+
+
+def upsert_topic_edge(persona_id: str, topic_a: str, topic_b: str, weight: float = 1.0) -> None:
+    a, b = sorted([topic_a, topic_b])
+    conn = _connect()
+    now = _now()
+    conn.execute("""
+        INSERT INTO topic_edges (persona_id, topic_a, topic_b, weight, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(persona_id, topic_a, topic_b) DO UPDATE SET weight = excluded.weight, updated_at = excluded.updated_at
+    """, (persona_id, a, b, weight, now))
+    conn.commit()
+    conn.close()
+
+
+def get_topic_edges(persona_id: str) -> list[dict]:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT topic_a, topic_b, weight FROM topic_edges WHERE persona_id = ? ORDER BY weight DESC",
+        (persona_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_topic_edges(persona_id: str) -> None:
+    conn = _connect()
+    conn.execute("DELETE FROM topic_edges WHERE persona_id = ?", (persona_id,))
+    conn.commit()
+    conn.close()
 
 
 def decay_topics(persona_id: str, current_cycle: int, weak_threshold: int = 30, delete_threshold: int = 50) -> list[str]:
