@@ -117,7 +117,7 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
   }
 
   // ── Envia mensagem ─────────────────────────────────────────────────────────
-  async function sendMessage(text) {
+  async function sendMessage(text, image = null) {
     if (!text.trim() || loading) return
     setError(null)
 
@@ -144,7 +144,7 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
       return
     }
 
-    const userMsg = { role: 'user', content: text }
+    const userMsg = { role: 'user', content: text, image: image || null }
     const history = buildHistory(messages.map(m => ({ role: m.role, content: m.content })))
 
     setMessages(prev => [...prev, userMsg])
@@ -175,6 +175,7 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
           session_id: currentSessionId.current ?? null,
           pro: pro ?? false,
           persona_id: personaId ?? null,
+          ...(image ? { image } : {}),
         }),
       })
 

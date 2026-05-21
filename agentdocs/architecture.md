@@ -1,4 +1,4 @@
-# Arquitectura — Lucy (Personal AI) · V0.5
+# Arquitectura — Lucy (Personal AI) · V0.6
 
 > Decisões arquitecturais e esquema de dados actual. Para navegação de UI ver `NAV.txt`. Para regras de sessão ver `CLAUDE.md`.
 
@@ -25,6 +25,7 @@ Lucy.app (macOS)          ← duplo-clique arranca tudo
                ├── AutoLearner            → asyncio background task por persona
                ├── Deep Mind              → reasoning opcional (Qwen3.5 / Qwen3.6)
                ├── TTS                    → Resemble.ai (PT: f.cluster, EN: p.cluster)
+               ├── Vision (screen share)  → getDisplayMedia → base64 JPEG → OpenAI vision format
                └── Personas               → backend/persona/*.json
 ```
 
@@ -327,7 +328,7 @@ RAM via `psutil` + `vm_stat`. Swap > 60% → aviso no UI. Polled a cada 3s no Pe
 ## Fluxo de um Turno de Chat
 
 ```
-POST /api/chat  { message, session_id, model, language, persona_id }
+POST /api/chat  { message, session_id, model, language, persona_id, image? }
     ├── criar/retomar sessão SQLite
     ├── search_memories(message) → LanceDB (top 8)
     ├── get_system_prompt()
@@ -336,12 +337,58 @@ POST /api/chat  { message, session_id, model, language, persona_id }
     │       → + últimos 5 self-learnings desta persona (sempre presentes)
     │       → + conhecimento relevante para os temas da mensagem
     ├── buildHistory(msgs) → join de msgs consecutivas do mesmo role
+    ├── se image presente: content = [{ type: text }, { type: image_url, base64 }]
     ├── POST LM Studio (streaming)
     └── _stream_and_collect()
             ├── SSE → frontend
             ├── log_turn() → SQLite conversations
             └── extract_and_store() → background: LanceDB + SQLite facts
 ```
+
+---
+
+## Vision — Screen Share
+
+Permite partilhar o ecrã ou uma janela com a persona durante o chat.
+
+### Fluxo
+
+```
+Utilizador clica 🖥️ no MessageInput
+    → navigator.mediaDevices.getDisplayMedia() → picker nativo do browser
+    → MediaStream fica activo em background (<video> hidden)
+    → indicador visual: borda vermelha + thumbnail + "A capturar ecrã"
+
+Ao enviar mensagem (se screen share activo):
+    → canvas.drawImage(video) → resize máx 1440px → JPEG q=0.70 → base64
+    → POST /api/chat com campo image: base64
+    → thumbnail visível na bolha do utilizador
+    → backend formata content como array vision [text, image_url]
+    → Gemma4 (multimodal) processa texto + imagem
+```
+
+### Detalhes técnicos
+
+| Item | Valor |
+|---|---|
+| Resolução de captura | máx 1440px de largura |
+| Formato | JPEG quality 0.70 |
+| Tamanho típico | ~100–200 KB |
+| Base64 típico | ~130–270 KB |
+| Tempo de resposta (Gemma E4B) | ~1.5–3s |
+| Modelo mínimo | Gemma4 E4B (multimodal) |
+
+### Instrução nas personas
+
+Todos os system prompts incluem secção **"Visão de ecrã"** que instrui a persona a:
+- Ler o conteúdo visível (texto, código, história) quando o utilizador pergunta sobre ele
+- Não descrever a interface à volta — ir directo ao conteúdo
+- Manter a personalidade da persona na resposta
+
+### Recomendação de uso
+
+- **"Janela"** no picker → modelo vê só essa janela (melhor foco)
+- **"Ecrã inteiro"** → modelo vê tudo incluindo o próprio Lucy (mais contexto, menos detalhe por área)
 
 ---
 

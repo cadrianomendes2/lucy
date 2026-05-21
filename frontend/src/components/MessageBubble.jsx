@@ -16,11 +16,22 @@ export default function MessageBubble({ message, personaName }) {
           </span>
         )}
 
+        {isUser && message.image && (
+          <div style={{ marginBottom: 4, borderRadius: '8px 8px 0 0', overflow: 'hidden', border: '1px solid var(--border)' }}>
+            <img
+              src={`data:image/jpeg;base64,${message.image}`}
+              alt="ecrã"
+              style={{ width: '100%', display: 'block', maxHeight: 120, objectFit: 'cover', objectPosition: 'top' }}
+            />
+          </div>
+        )}
+
         <div style={{
           padding: isTyping ? '10px 14px' : '8px 12px',
-          borderRadius: isUser ? '8px 8px 2px 8px' : '2px 8px 8px 8px',
+          borderRadius: isUser ? (message.image ? '0 0 2px 8px' : '8px 8px 2px 8px') : '2px 8px 8px 8px',
           background: isUser ? 'var(--user-bubble)' : 'var(--ai-bubble)',
           border: '1px solid var(--border)',
+          borderTop: isUser && message.image ? 'none' : '1px solid var(--border)',
           color: 'var(--text)',
           fontSize: 14,
           lineHeight: 1.5,

@@ -511,6 +511,7 @@ class ChatRequest(BaseModel):
     session_id: int | None = None
     pro: bool = False
     persona_id: str | None = None
+    image: str | None = None  # base64 JPEG do ecrã capturado
 
 
 def _extra_params(model_key: str, thinking_mode: str = "off") -> dict:
@@ -564,8 +565,9 @@ async def _stream_messages(messages: list[dict], model_id: str, model_key: str =
     yield "data: [DONE]\n\n"
 
 
-async def chat_with_search(message: str, history: list[dict], model_id: str, model_key: str, thinking_mode: str, system_prompt: str):
-    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": message}]
+async def chat_with_search(message: str, history: list[dict], model_id: str, model_key: str, thinking_mode: str, system_prompt: str, image: str | None = None):
+    user_content = [{"type": "text", "text": message}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}}] if image else message
+    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_content}]
     try:
         first = await _call_once(messages, model_id, model_key=model_key, thinking_mode=thinking_mode, tools=[WEB_SEARCH_TOOL])
         choice = first["choices"][0]
@@ -674,7 +676,7 @@ async def _chat_generator(req: ChatRequest):
     knowledge_context = get_knowledge_context(knowledge_domains, level="summary") if knowledge_domains else ""
     system_prompt = get_system_prompt(req.language, relevant, knowledge_context, pro=req.pro, persona_id=req.persona_id)
     model_id = MODELS[req.model]
-    base = chat_with_search(req.message, req.history, model_id, req.model, req.thinking_mode, system_prompt)
+    base = chat_with_search(req.message, req.history, model_id, req.model, req.thinking_mode, system_prompt, image=req.image)
     async for chunk in _stream_and_collect(base, req.message, req.model, model_id, req.language, session_id, pro=req.pro):
         yield chunk
 
