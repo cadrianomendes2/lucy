@@ -29,6 +29,7 @@ async def extract_and_store(
     assistant_message: str,
     lm_studio_url: str,
     model_id: str,
+    pro: bool = False,
 ) -> list[str]:
     if not user_message.strip():
         return []
@@ -70,10 +71,11 @@ async def extract_and_store(
     except (json.JSONDecodeError, AttributeError):
         return []
 
+    source = "pro|conversation" if pro else "conversation"
     now = datetime.now(timezone.utc).isoformat()
     for fact in facts:
         fact_id = str(uuid.uuid4())
-        upsert_memory(fact_id, fact, source="conversation", timestamp=now)
-        save_fact(fact_id, fact, source="conversation")
+        upsert_memory(fact_id, fact, source=source, timestamp=now)
+        save_fact(fact_id, fact, source=source)
 
     return facts

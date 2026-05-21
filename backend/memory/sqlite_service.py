@@ -14,6 +14,15 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     conn = _connect()
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS topics (
+            persona_id  TEXT NOT NULL,
+            topic       TEXT NOT NULL,
+            strength    REAL DEFAULT 1.0,
+            research_count INTEGER DEFAULT 1,
+            last_cycle  INTEGER DEFAULT 0,
+            created_at  TEXT NOT NULL,
+            PRIMARY KEY (persona_id, topic)
+        );
         CREATE TABLE IF NOT EXISTS sessions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             title      TEXT NOT NULL DEFAULT 'Nova conversa',
@@ -37,21 +46,26 @@ def init_db() -> None:
             created_at TEXT NOT NULL
         );
     """)
-    # migração: adicionar session_id se não existir (dados antigos ficam com NULL)
-    try:
-        conn.execute("ALTER TABLE conversations ADD COLUMN session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE")
-        conn.commit()
-    except Exception:
-        pass
+    # migrações incrementais
+    for migration in [
+        "ALTER TABLE conversations ADD COLUMN session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE",
+        "ALTER TABLE sessions ADD COLUMN persona_id TEXT",
+        "ALTER TABLE sessions ADD COLUMN is_pro INTEGER DEFAULT 0",
+    ]:
+        try:
+            conn.execute(migration)
+            conn.commit()
+        except Exception:
+            pass
     conn.close()
 
 
-def create_session(title: str, model: str) -> int:
+def create_session(title: str, model: str, persona_id: str | None = None, is_pro: bool = False) -> int:
     conn = _connect()
     now = _now()
     cur = conn.execute(
-        "INSERT INTO sessions (title, model, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (title, model, now, now),
+        "INSERT INTO sessions (title, model, persona_id, is_pro, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (title, model, persona_id, 1 if is_pro else 0, now, now),
     )
     session_id = cur.lastrowid
     conn.commit()
@@ -76,15 +90,25 @@ def touch_session(session_id: int) -> None:
     conn.close()
 
 
-def get_sessions() -> list[dict]:
+def get_sessions(persona_id: str | None = None, is_pro: bool | None = None) -> list[dict]:
     conn = _connect()
-    rows = conn.execute("""
-        SELECT s.id, s.title, s.model, s.created_at, s.updated_at,
+    conditions = []
+    params = []
+    if persona_id:
+        conditions.append("s.persona_id = ?")
+        params.append(persona_id)
+    if is_pro is not None:
+        conditions.append("COALESCE(s.is_pro, 0) = ?")
+        params.append(1 if is_pro else 0)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    rows = conn.execute(f"""
+        SELECT s.id, s.title, s.model, s.persona_id, s.is_pro, s.created_at, s.updated_at,
                (SELECT content FROM conversations
                 WHERE session_id = s.id ORDER BY timestamp DESC LIMIT 1) as preview
         FROM sessions s
+        {where}
         ORDER BY s.updated_at DESC
-    """).fetchall()
+    """, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -152,3 +176,52 @@ def delete_fact(fact_id: str) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── Topic lifecycle management ────────────────────────────────────────────────
+
+def upsert_topic(persona_id: str, topic: str, cycle: int) -> None:
+    conn = _connect()
+    conn.execute("""
+        INSERT INTO topics (persona_id, topic, strength, research_count, last_cycle, created_at)
+        VALUES (?, ?, 1.0, 1, ?, ?)
+        ON CONFLICT(persona_id, topic) DO UPDATE SET
+            strength = MIN(strength + 1.0, 20.0),
+            research_count = research_count + 1,
+            last_cycle = excluded.last_cycle
+    """, (persona_id, topic, cycle, _now()))
+    conn.commit()
+    conn.close()
+
+
+def get_topics(persona_id: str) -> list[dict]:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT topic, strength, research_count, last_cycle FROM topics WHERE persona_id = ? ORDER BY strength DESC",
+        (persona_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def decay_topics(persona_id: str, current_cycle: int, weak_threshold: int = 30, delete_threshold: int = 50) -> list[str]:
+    """Decai tópicos não reforçados. Devolve lista de tópicos apagados."""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT topic, last_cycle, strength FROM topics WHERE persona_id = ?",
+        (persona_id,)
+    ).fetchall()
+    deleted = []
+    for r in rows:
+        idle = current_cycle - r["last_cycle"]
+        if idle >= delete_threshold:
+            conn.execute("DELETE FROM topics WHERE persona_id = ? AND topic = ?", (persona_id, r["topic"]))
+            deleted.append(r["topic"])
+        elif idle >= weak_threshold:
+            # decai a força
+            new_strength = max(0.1, r["strength"] * 0.7)
+            conn.execute("UPDATE topics SET strength = ? WHERE persona_id = ? AND topic = ?",
+                         (new_strength, persona_id, r["topic"]))
+    conn.commit()
+    conn.close()
+    return deleted

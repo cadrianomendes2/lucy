@@ -65,7 +65,7 @@ def upsert_memory(fact_id: str, fact: str, source: str, timestamp: str) -> None:
     table.add([{"id": fact_id, "fact": fact, "source": source, "timestamp": timestamp, "vector": vector}])
 
 
-def search_memories(query: str, top_k: int = 5) -> list[dict]:
+def search_memories(query: str, top_k: int = 5, pro: bool = False) -> list[dict]:
     table = _get_table()
     try:
         row_count = table.count_rows()
@@ -75,13 +75,15 @@ def search_memories(query: str, top_k: int = 5) -> list[dict]:
         return []
     model = _get_model()
     vector = model.encode(query).tolist()
-    # Busca mais resultados do que o necessário para poder desduplicar
     results = (
         table.search(vector)
         .limit(min(top_k * 3, row_count))
         .to_pandas()
     )
-    # Desduplicar por conteúdo — guardar apenas o facto mais recente de cada grupo similar
+    # Lucy standard não vê memórias do modo Pro
+    if not pro:
+        results = results[~results["source"].str.startswith("pro|", na=False)]
+    # Desduplicar por conteúdo
     seen: list[str] = []
     unique_rows = []
     for _, row in results.iterrows():
@@ -112,3 +114,11 @@ def get_all_memories() -> list[dict]:
 def delete_memory(fact_id: str) -> None:
     table = _get_table()
     table.delete(f"id = '{fact_id}'")
+
+
+def wipe_all_memories() -> None:
+    table = _get_table()
+    try:
+        table.delete("id IS NOT NULL")
+    except Exception:
+        pass

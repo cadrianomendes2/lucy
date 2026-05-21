@@ -1,15 +1,38 @@
 import { useState, useEffect, useRef } from 'react'
 
-const MODEL_INFO = {
-  'nemo-12b':     { label: 'Nemo Roleplay', sub: '12B · PT' },
-  'qwen-40b':     { label: 'Qwen3.6 40B', sub: '40B · Reasoning' },
-  'qwen-9b-auto': { label: 'Qwen3.5 9B Auto', sub: '9B · Reasoning' },
-  'gemma-lite':   { label: 'Gemma E4B', sub: '7.5B · Fast' },
-  'qwen-27b':     { label: 'Qwen3.5 27B', sub: '27B · Reasoning' },
-  'gemma-26b':    { label: 'Gemma 26B', sub: '26B' },
-  'gpt-20b':      { label: 'GPT-OSS 20B', sub: '20B' },
-  'qwen-9b':      { label: 'Qwen3.5 9B', sub: '9B · Reasoning' },
-}
+// Modelos agrupados por categoria
+const MODEL_GROUPS = [
+  {
+    models: [
+      { key: 'qwen-9b',     label: 'Qwen3.5 9B',   sub: '9B · Reasoning' },
+      { key: 'qwen-27b',    label: 'Qwen3.5 27B',  sub: '27B · Reasoning' },
+      { key: 'qwen-40b',    label: 'Qwen3.6 40B',  sub: '40B · Reasoning' },
+    ],
+  },
+  {
+    models: [
+      { key: 'gemma-lite',  label: 'Gemma E4B',    sub: '7.5B · Fast' },
+      { key: 'gemma-26b',   label: 'Gemma 26B',    sub: '26B' },
+    ],
+  },
+  {
+    models: [
+      { key: 'nemo-12b',    label: 'Nemo Roleplay', sub: '12B · PT' },
+    ],
+  },
+]
+
+// Mapa plano para lookup rápido
+const MODEL_INFO = {}
+MODEL_GROUPS.forEach(g => g.models.forEach(m => { MODEL_INFO[m.key] = m }))
+
+// Níveis de reasoning com cor da pill
+const REASONING_LEVELS = [
+  { key: 'off',  label: 'Off',  color: '#8696a0' },
+  { key: 'fast', label: 'Fast', color: '#00a884' },
+  { key: 'med',  label: 'Med',  color: '#25d366' },
+  { key: 'max',  label: 'Max',  color: '#4ade80' },
+]
 
 function Dot({ loaded }) {
   return (
@@ -18,14 +41,33 @@ function Dot({ loaded }) {
       width: 7,
       height: 7,
       borderRadius: '50%',
-      background: loaded ? '#4ade80' : '#444',
+      background: loaded ? '#4ade80' : '#d1d5db',
       boxShadow: loaded ? '0 0 5px #4ade80aa' : 'none',
       flexShrink: 0,
     }} />
   )
 }
 
-export default function ModelSelector({ model, onChange }) {
+// Pill colorida de reasoning
+function ReasoningPill({ level }) {
+  if (level === 'off') return null
+  const info = REASONING_LEVELS.find(r => r.key === level) || REASONING_LEVELS[1]
+  return (
+    <span style={{
+      padding: '1px 7px',
+      borderRadius: 10,
+      background: info.color,
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: 600,
+      letterSpacing: '0.03em',
+    }}>
+      {info.label}
+    </span>
+  )
+}
+
+export default function ModelSelector({ model, onChange, thinkingMode = 'off', onReasoningChange }) {
   const [open, setOpen] = useState(false)
   const [loadedKeys, setLoadedKeys] = useState([])
   const ref = useRef(null)
@@ -58,6 +100,7 @@ export default function ModelSelector({ model, onChange }) {
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
+      {/* Botão principal */}
       <button
         onClick={() => setOpen(v => !v)}
         style={{
@@ -66,61 +109,129 @@ export default function ModelSelector({ model, onChange }) {
           gap: 6,
           fontSize: 13,
           fontWeight: 500,
-          color: 'var(--text-muted)',
-          padding: '4px 10px',
+          color: 'var(--text-soft)',
+          padding: '5px 11px',
           borderRadius: 20,
-          border: '1px solid var(--border)',
-          background: open ? 'var(--bg-secondary, #1a1a2e)' : 'var(--surface)',
+          border: `1px solid ${open ? 'var(--accent)' : 'var(--border)'}`,
+          background: 'var(--surface)',
           cursor: 'pointer',
           whiteSpace: 'nowrap',
+          transition: 'border-color 0.12s',
         }}
       >
         <Dot loaded={isLoaded} />
-        {current.label}
-        <span style={{ fontSize: 10, opacity: 0.5 }}>▾</span>
+        <span>{current.label}</span>
+        <ReasoningPill level={thinkingMode} />
+        <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 2 }}>▾</span>
       </button>
 
+      {/* Dropdown */}
       {open && (
         <div style={{
           position: 'absolute',
           top: 'calc(100% + 6px)',
           right: 0,
-          background: 'var(--surface, #111)',
-          border: '1px solid var(--border, #333)',
-          borderRadius: 10,
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
           padding: '4px 0',
-          minWidth: 200,
-          zIndex: 100,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          minWidth: 220,
+          zIndex: 200,
+          boxShadow: '0 8px 28px rgba(0,0,0,0.12)',
         }}>
-          {Object.entries(MODEL_INFO).map(([key, info]) => {
-            const loaded = loadedKeys.includes(key)
-            const selected = key === model
-            return (
-              <button
-                key={key}
-                onClick={() => { onChange(key); setOpen(false) }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  padding: '7px 14px',
-                  background: selected ? 'var(--bg-secondary, #1a1a2e)' : 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'inherit',
-                  textAlign: 'left',
-                }}
-              >
-                <Dot loaded={loaded} />
-                <span style={{ flex: 1 }}>
-                  <span style={{ fontSize: 13, fontWeight: selected ? 600 : 400 }}>{info.label}</span>
-                  <span style={{ fontSize: 11, opacity: 0.45, marginLeft: 6 }}>{info.sub}</span>
-                </span>
-              </button>
-            )
-          })}
+          {/* Grupos de modelos */}
+          {MODEL_GROUPS.map((group, gi) => (
+            <div key={gi}>
+              {gi > 0 && (
+                <div style={{
+                  height: 1,
+                  background: 'var(--border)',
+                  margin: '4px 0',
+                }} />
+              )}
+              {group.models.map(info => {
+                const loaded = loadedKeys.includes(info.key)
+                const selected = info.key === model
+                return (
+                  <button
+                    key={info.key}
+                    onClick={() => { onChange(info.key); setOpen(false) }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      width: '100%',
+                      padding: '9px 14px',
+                      background: selected ? 'rgba(0,168,132,0.05)' : 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text)',
+                      textAlign: 'left',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--surface2)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = selected ? 'rgba(0,168,132,0.05)' : 'none' }}
+                  >
+                    <Dot loaded={loaded} />
+                    <span style={{ flex: 1 }}>
+                      <span style={{ fontSize: 13, fontWeight: selected ? 600 : 400, display: 'block' }}>
+                        {info.label}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, display: 'block' }}>
+                        {info.sub}
+                      </span>
+                    </span>
+                    {selected && (
+                      <span style={{ color: 'var(--accent)', fontSize: 14 }}>✓</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+
+          {/* Secção de Reasoning */}
+          <div style={{
+            height: 1,
+            background: 'var(--border)',
+            margin: '4px 0',
+          }} />
+          <div style={{ padding: '8px 14px 6px' }}>
+            <div style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--text-muted)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}>
+              Reasoning
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {REASONING_LEVELS.map(r => {
+                const active = thinkingMode === r.key
+                return (
+                  <button
+                    key={r.key}
+                    onClick={() => onReasoningChange?.(r.key)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 12,
+                      border: 'none',
+                      background: active ? r.color : 'var(--surface2)',
+                      color: active ? '#fff' : 'var(--text-muted)',
+                      fontSize: 11,
+                      fontWeight: active ? 600 : 400,
+                      cursor: 'pointer',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    {r.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

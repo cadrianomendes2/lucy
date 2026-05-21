@@ -125,6 +125,8 @@ QDRANT_URL=http://localhost:6333   # V0.2+
 
 ## Referências
 
+- `NAV.txt` — navegação completa da app: páginas, painéis, fluxos, personas, modelos, vozes, sessões e modo Pro
+- `agentdocs/architecture.md` — arquitectura de dados actual: SQLite, LanceDB, personas, Pro mode, AutoLearner, TTS, routing de modelos
 - `app-map.json` — mapa de ecrãs e estado de implementação
 - `CONTEXT.md` — estado actual e handoff entre sessões
 - `agentdocs/` — specs por versão/feature

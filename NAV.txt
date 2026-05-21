@@ -1,0 +1,217 @@
+NAVEGAÇÃO — Lucy App
+====================
+Última actualização: Mai 2026
+
+
+RAIL (barra lateral esquerda, sempre visível)
+─────────────────────────────────────────────
+Logo (ícone verde)   → Perfil / Personas
+👤 Perfil            → página de utilizador e gestão de personas
+💬 Chat              → chat com os contactos
+◈ Mente              → grafo de conhecimento por persona
+⊞ Aprender           → auto-aprendizagem autónoma
+⚙ Definições         → placeholder (em construção)
+
+Avatar do utilizador (canto inferior) → menu: Trocar utilizador / Sair (sem acção por agora)
+
+
+PÁGINAS
+═══════
+
+━━━ PERFIL (/profile) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Layout 3 painéis (fixo | flex | fixo):
+
+[ Utilizador 200px ] [ Personas (grid) flex ] [ Sistema / Editor 260px ]
+
+Painel 1 – Utilizador
+  • Foto (upload → guarda em /avatars/user-photo.jpg no servidor)
+  • Nome
+  • Conta: Utilizador local
+  • Interesses pessoais (tags livres, guardadas em localStorage)
+  • Botão "Editar" → modo edição inline
+
+Painel 2 – Personas (grid auto-fill, mín 130px por card)
+  • Cards com: avatar, nome, modelo, 2 interesses + "+N"
+  • PRO badge (dourado) se persona.pro = true
+  • "desactivado" badge (vermelho) se persona.enabled = false
+  • Clicar num card → abre o Editor (painel 3)
+
+Painel 3 – Contextual
+  • Sem card seleccionado → painel "Sistema":
+      MODELOS: lista com bolinha verde = carregado no LM Studio
+      VOZES: Vanessa (pt-BR), Marvin (pt-BR), Laura (en-US), GLaDOS (en-GB)
+              botão ▶ = ouvir amostra
+      HARDWARE: Microfone / Câmara (placeholder "em breve")
+  • Com card seleccionado → Editor de persona:
+      Toggles: Activada / PRO
+      Descrição (textarea)
+      Interesses fixos (máx 6, tags)
+      Modelo preferido (select)
+      Voz (select)
+      Língua: PT / EN
+      Botão Guardar
+
+
+━━━ CHAT (/chat) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Layout: Rail | Contactos (280px) | Chat (flex) | Painel direito (320px, retrátil < 1100px)
+
+Painel esquerdo – Contactos
+  • Lista de personas activas (enabled = true, !pro)
+  • Clicar num contacto:
+      1. Muda a persona activa (modelo, língua, voz)
+      2. Chama POST /api/persona/switch no backend
+      3. Carrega a última sessão desta persona (pre-fill de mensagens)
+      4. Chat abre com o histórico da última conversa
+  • "Ver conversas" → histórico filtrado por persona + is_pro
+  • Perfil do contacto:
+      • Status: disponível / desactivado
+      • Stats: memórias, interesses, sessões
+      • Botão PRO (Lucy e GLaDOS) → pede PIN 1213 → modo incógnito
+
+Header do chat
+  • Avatar + nome da persona activa
+  • Sessão activa / Nova conversa
+  • Ícone microfone (toggle TTS)
+  • Selector de modelo (verifica modelos carregados, fallback automático)
+  • 🗑 Limpar chat (reseta sessão + chatKey)
+  • ▣ Toggle painel direito
+
+Chat principal
+  • Respostas divididas por parágrafo (bolhas separadas)
+  • Delay ~900ms entre parágrafos (efeito WhatsApp)
+  • TTS: controlos ▶/⏸ + ondas animadas + replay por parágrafo
+  • Persona desactivada → input bloqueado "Esta persona está desactivada"
+
+Painel direito – Memórias & Interesses
+  • INTERESSES:
+      Verde = interesses fixos da persona (persona.json)
+      Cores = pesquisas autónomas do AutoLearner
+  • MEMÓRIA: factos do utilizador + botão "wipe" (pede PIN após confirmação)
+  • PESQUISAS: o que a persona aprendeu autonomamente (filtrado por persona)
+  • GALERIA: imagens da persona activa
+  • Actualiza automaticamente ao trocar de contacto
+
+
+━━━ MENTE (/mind) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Layout 3 painéis (180-280px | flex | 220px):
+
+[ Personas ] [ Grafo SVG ] [ Chat com persona ]
+
+Painel 1 – Lista de personas
+  • Mesmo estilo que contactos do chat
+  • Clicar → muda o grafo + chat + chama /api/persona/switch
+
+Painel 2 – Grafo dinâmico
+  • Actualiza a cada 10s via /api/topics/{persona_id}
+  • Nó central: avatar da persona
+  • Nós anel: tópicos conhecidos (fixos + aprendidos)
+  • Tamanho do nó ∝ força (strength) do tópico
+  • Nó fraco (strength < 1.5): semi-transparente + anel vermelho tracejado + "⚠ fraco"
+  • Clicar num nó → bottom bar com:
+      • Número de factos
+      • Botão "apagar" (remove todos os factos do tópico + confirma)
+      • Auto-gera resumo no painel chat (via /api/topics/{pid}/{topic}/summary)
+
+Painel 3 – Chat com a persona
+  • Usa o modelo e língua da persona seleccionada (com fallback)
+  • Clicar nó → gera automaticamente um resumo do que a persona sabe
+      formato: "Resumo... \n\nAcho que também pode interessar:\n- X\n- Y"
+  • Input manual: perguntar sobre qualquer coisa
+
+
+━━━ APRENDER (/learn) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Layout 3 painéis (200-280px | flex | 200-280px):
+
+[ Controlo ] [ Feed ao vivo ] [ Por persona ]
+
+Painel 1 – Controlo
+  • Toggle ON/OFF por persona (switch estilo iOS)
+  • Slider: intervalo por persona (1-30 min, padrão 2 min)
+  • Campo: limite de ciclos (vazio = ilimitado)
+  • Estimativa: "Ciclo completo: ~N min"
+  • Botão ▶ Iniciar / ⏹ Parar (verde/vermelho)
+
+Painel 2 – Feed ao vivo (tabs: Ao vivo | Timeline)
+  Ao vivo:
+    • Card animado (pulso) da actividade actual:
+        🔍 Pesquisando   → tópico fixo
+        🔭 A descobrir   → gerado pela personalidade
+        🔗 A sintetizar  → cross-topic (combina 3+ tópicos)
+        🌟 Novo absoluto → fora de todos os tópicos conhecidos
+    • Últimas 8 aprendizagens em cards
+  Timeline:
+    • Lista vertical com linha do tempo
+    • Avatar da persona + tópico + insights + hora
+
+Estratégia de pesquisa (automática):
+  40% — tópico fixo dos interesses da persona
+  25% — descoberta (modelo sugere baseado na personalidade)
+  25% — síntese cross-topic (combina 3-4 tópicos → nó emergente)
+  10% — exploração nova absoluta (tabula rasa)
+  + garantia a cada 10 ciclos → forçosamente algo novo
+
+Lifecycle dos nós:
+  • Cada pesquisa → força +1 (máx 20)
+  • A cada 5 ciclos → decay: idle 30+ → força -30%; idle 50+ → apagado
+  • Apagados: factos removidos do LanceDB + SQLite + tabela topics
+
+Painel 3 – Estatísticas por persona
+  • Avatar + nome + badge "activo" se a correr
+  • Contagem de aprendizagens
+  • Chips dos tópicos pesquisados nesta sessão
+  • Total da sessão
+
+
+SESSÕES E MEMÓRIA
+═════════════════
+• Sessões: separadas por persona_id + is_pro
+    Normal:  persona_id=lucy, is_pro=0
+    Pro:     persona_id=lucy, is_pro=1  (incógnito, não aparece no histórico normal)
+
+• Memórias (LanceDB):
+    self|tema         → Lucy (learner antigo, partilhado só com Lucy)
+    self_lucy|tema    → Lucy (AutoLearner novo)
+    self_samantha|...  → Samantha
+    self_marvin|...    → Marvin
+    [sem prefixo self] → factos do utilizador (partilhados por todas as personas)
+
+• Topics (SQLite): persona_id | topic | strength | research_count | last_cycle
+
+PRO MODE
+════════
+  • Lucy e GLaDOS têm modo Pro (usa system_prompts_pro do JSON)
+  • Activar: clicar "🔒 Entrar em Pro" no perfil → PIN 1213
+  • Sessões Pro: completamente separadas (is_pro=1)
+  • Desactivar: clicar de novo, sem PIN
+  • Pro herda o conhecimento da versão normal; normal NÃO vê o histórico Pro
+
+
+MODELOS DISPONÍVEIS
+════════════════════
+  gemma-lite   → Gemma E4B 7.5B (padrão, usado para pesquisa)
+  nemo-12b     → Nemo Roleplay 12B PT
+  gemma-26b    → Gemma 26B
+  qwen-9b      → Qwen3.5 9B (Reasoning)
+  qwen-27b     → Qwen3.5 27B (Reasoning)
+  qwen-40b     → Qwen3.6 40B (Reasoning)
+
+  Fallback automático: se o modelo da persona não estiver carregado,
+  usa o primeiro modelo carregado no LM Studio.
+
+VOZES
+═════
+  Vanessa  pt-BR  → voz da Lucy
+  Marvin   pt-BR  → voz do Marvin
+  Laura    en-US  → voz da Samantha
+  GLaDOS   en-GB  → voz da GLaDOS
+
+PERSONAS
+════════
+  Lucy     → filosofia, história, alto-estima, conversar (modo Pro disponível)
+  Samantha → filosofia, política, comunismo
+  Marvin   → astrofísica, portas (+ nós descobertos)
+  GLaDOS   → ai, human control, sarcasm (modo Pro disponível)
