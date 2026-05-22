@@ -498,12 +498,12 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
       {roleplayMode && pro && (
         <div style={{
           padding: '12px 16px 10px',
-          borderTop: '2px solid #7c3aed44',
+          borderTop: '2px solid #d4a01033',
           background: 'var(--surface)',
           flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 10, fontWeight: 800, color: '#7c3aed', letterSpacing: '0.08em' }}>ROLEPLAY</span>
+            <span style={{ fontSize: 10, fontWeight: 800, color: '#d4a010', letterSpacing: '0.08em' }}>ROLEPLAY</span>
             <button onClick={onRoleplayClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
           </div>
           <textarea
@@ -514,7 +514,7 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
             style={{
               width: '100%', resize: 'vertical', minHeight: 64, maxHeight: 180,
               background: 'var(--surface2)', color: 'var(--text)',
-              border: '1px solid #7c3aed44', borderRadius: 10,
+              border: '1px solid #d4a01033', borderRadius: 10,
               padding: '8px 10px', fontSize: 13, lineHeight: 1.5,
               fontFamily: 'inherit', boxSizing: 'border-box',
             }}
@@ -540,8 +540,8 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
               title="Melhorar cenário com IA"
               style={{
                 height: 32, padding: '0 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
-                border: '1px solid #7c3aed44', background: 'none',
-                color: improving ? 'var(--text-muted)' : '#7c3aed',
+                border: '1px solid #d4a01033', background: 'none',
+                color: improving ? 'var(--text-muted)' : '#d4a010',
                 cursor: !scenario.trim() || improving ? 'default' : 'pointer',
                 opacity: !scenario.trim() || improving ? 0.5 : 1,
                 transition: 'all 0.12s',
@@ -558,12 +558,14 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
               }}
               disabled={!scenario.trim() || loading}
               style={{
-                height: 32, padding: '0 14px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                border: 'none', background: '#7c3aed',
+                height: 32, padding: '0 16px', borderRadius: 8, fontSize: 11, fontWeight: 800,
+                letterSpacing: '0.04em',
+                border: 'none',
+                background: !scenario.trim() || loading ? 'var(--border)' : 'linear-gradient(135deg, #f59e0b, #d97706)',
                 color: '#fff',
                 cursor: !scenario.trim() || loading ? 'default' : 'pointer',
-                opacity: !scenario.trim() || loading ? 0.5 : 1,
-                transition: 'all 0.12s',
+                boxShadow: !scenario.trim() || loading ? 'none' : '0 2px 10px rgba(245,158,11,0.45)',
+                transition: 'all 0.15s',
               }}
             >
               Começar

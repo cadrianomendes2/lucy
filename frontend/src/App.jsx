@@ -997,24 +997,45 @@ function ContactProfile({ persona, pro, onTogglePro, onStartChat, onBack, stats 
           Ver conversas
         </button>
 
-        {/* PRO toggle — Lucy e GLaDOS */}
+        {/* PRO toggle premium */}
         {hasPro && (
-          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-            <button
-              onClick={onTogglePro}
-              style={{
-                flex: 1, padding: '10px 0', borderRadius: 10, fontWeight: 800,
-                fontSize: 12, letterSpacing: '0.08em', cursor: 'pointer',
-                border: `1.5px solid ${showPro ? '#f59e0b' : 'var(--border)'}`,
-                background: showPro ? 'rgba(245,158,11,0.1)' : 'var(--surface2)',
-                color: showPro ? '#d97706' : 'var(--text-muted)',
-                transition: 'all 0.2s',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}
-            >
-              {showPro ? 'PRO · aba privada' : 'Entrar em Pro'}
-            </button>
-          </div>
+          <button
+            onClick={onTogglePro}
+            style={{
+              width: '100%', padding: '11px 16px', borderRadius: 12, cursor: 'pointer',
+              border: `1.5px solid ${showPro ? '#c9930a' : 'var(--border)'}`,
+              background: showPro
+                ? 'linear-gradient(135deg, #2a1f00 0%, #1a1300 100%)'
+                : 'var(--surface2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              transition: 'all 0.25s',
+              boxShadow: showPro ? '0 0 16px rgba(212,160,10,0.18)' : 'none',
+            }}
+          >
+            <span style={{
+              fontWeight: 800, fontSize: 12, letterSpacing: '0.1em',
+              background: showPro ? 'linear-gradient(90deg, #fcd34d, #f59e0b, #d97706)' : 'none',
+              WebkitBackgroundClip: showPro ? 'text' : 'unset',
+              WebkitTextFillColor: showPro ? 'transparent' : 'var(--text-muted)',
+              color: showPro ? 'transparent' : 'var(--text-muted)',
+            }}>
+              {showPro ? 'PRO · aba privada' : 'Modo PRO'}
+            </span>
+            {/* Toggle switch */}
+            <div style={{
+              width: 38, height: 22, borderRadius: 11,
+              background: showPro ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'var(--border)',
+              position: 'relative', transition: 'background 0.25s', flexShrink: 0,
+              boxShadow: showPro ? '0 0 8px rgba(245,158,11,0.5)' : 'none',
+            }}>
+              <div style={{
+                position: 'absolute', top: 3, left: showPro ? 19 : 3,
+                width: 16, height: 16, borderRadius: '50%',
+                background: '#fff', transition: 'left 0.25s',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </div>
+          </button>
         )}
 
       </div>
@@ -1453,17 +1474,20 @@ function ChatPage({
         {/* Direita: voz + modelo + Pro */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
 
-          {/* Roleplay — só em Pro */}
+          {/* Roleplay — só em Pro, visual dourado premium */}
           {pro && (
             <button
               onClick={() => setRoleplayMode(v => !v)}
               title="Modo Roleplay"
               style={{
-                height: 32, padding: '0 10px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                border: `1px solid ${roleplayMode ? '#7c3aed' : 'var(--border)'}`,
-                background: roleplayMode ? 'rgba(124,58,237,0.1)' : 'none',
-                color: roleplayMode ? '#7c3aed' : 'var(--text-muted)',
-                cursor: 'pointer', letterSpacing: '0.04em', transition: 'all 0.12s',
+                height: 32, padding: '0 12px', borderRadius: 8, fontSize: 11, fontWeight: 800,
+                letterSpacing: '0.06em', cursor: 'pointer', transition: 'all 0.15s',
+                border: `1.5px solid ${roleplayMode ? '#c9930a' : '#b8860b44'}`,
+                background: roleplayMode
+                  ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                  : 'rgba(212,160,10,0.07)',
+                color: roleplayMode ? '#fff' : '#d4a010',
+                boxShadow: roleplayMode ? '0 2px 10px rgba(245,158,11,0.4)' : 'none',
               }}
             >
               Roleplay
