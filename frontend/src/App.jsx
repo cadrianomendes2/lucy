@@ -1645,10 +1645,12 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
       fetch(`/api/topics/${persona.id}`)
         .then(r => r.json())
         .then(d => setLearnedTopics(Array.isArray(d) ? d.map(t => ({
-          interest: t.topic,
+          interest: t.topic, topic: t.topic,
           count: t.research_count || 1,
           strength: t.strength || 1,
           lastCycle: t.last_cycle || 0,
+          parent_topic: t.parent_topic || null,
+          origin_interest: t.origin_interest || null,
         })) : []))
         .catch(() => {})
     }
@@ -1802,7 +1804,8 @@ function MindPage({ model, language, darkMode }) {
     try {
       const topics = await fetch(`/api/topics/${p.id}`).then(r => r.json())
       setLearnedTopics3D(Array.isArray(topics) ? topics.map(t => ({
-        interest: t.topic, count: t.research_count || 1, strength: t.strength || 1,
+        interest: t.topic, topic: t.topic, count: t.research_count || 1, strength: t.strength || 1,
+        parent_topic: t.parent_topic || null, origin_interest: t.origin_interest || null,
       })) : [])
     } catch {}
     try {

@@ -22,12 +22,14 @@ def init_db() -> None:
             facts_after      INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS topics (
-            persona_id  TEXT NOT NULL,
-            topic       TEXT NOT NULL,
-            strength    REAL DEFAULT 1.0,
-            research_count INTEGER DEFAULT 1,
-            last_cycle  INTEGER DEFAULT 0,
-            created_at  TEXT NOT NULL,
+            persona_id       TEXT NOT NULL,
+            topic            TEXT NOT NULL,
+            strength         REAL DEFAULT 1.0,
+            research_count   INTEGER DEFAULT 1,
+            last_cycle       INTEGER DEFAULT 0,
+            created_at       TEXT NOT NULL,
+            parent_topic     TEXT,
+            origin_interest  TEXT,
             PRIMARY KEY (persona_id, topic)
         );
         CREATE TABLE IF NOT EXISTS learner_log (
@@ -78,6 +80,8 @@ def init_db() -> None:
         "ALTER TABLE conversations ADD COLUMN session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE",
         "ALTER TABLE sessions ADD COLUMN persona_id TEXT",
         "ALTER TABLE sessions ADD COLUMN is_pro INTEGER DEFAULT 0",
+        "ALTER TABLE topics ADD COLUMN parent_topic TEXT",
+        "ALTER TABLE topics ADD COLUMN origin_interest TEXT",
     ]:
         try:
             conn.execute(migration)
@@ -207,16 +211,18 @@ def _now() -> str:
 
 # ── Topic lifecycle management ────────────────────────────────────────────────
 
-def upsert_topic(persona_id: str, topic: str, cycle: int) -> None:
+def upsert_topic(persona_id: str, topic: str, cycle: int, parent_topic: str | None = None, origin_interest: str | None = None) -> None:
     conn = _connect()
     conn.execute("""
-        INSERT INTO topics (persona_id, topic, strength, research_count, last_cycle, created_at)
-        VALUES (?, ?, 1.0, 1, ?, ?)
+        INSERT INTO topics (persona_id, topic, strength, research_count, last_cycle, created_at, parent_topic, origin_interest)
+        VALUES (?, ?, 1.0, 1, ?, ?, ?, ?)
         ON CONFLICT(persona_id, topic) DO UPDATE SET
             strength = MIN(strength + 1.0, 20.0),
             research_count = research_count + 1,
-            last_cycle = excluded.last_cycle
-    """, (persona_id, topic, cycle, _now()))
+            last_cycle = excluded.last_cycle,
+            parent_topic    = COALESCE(excluded.parent_topic, parent_topic),
+            origin_interest = COALESCE(excluded.origin_interest, origin_interest)
+    """, (persona_id, topic, cycle, _now(), parent_topic, origin_interest))
     conn.commit()
     conn.close()
 
@@ -224,7 +230,7 @@ def upsert_topic(persona_id: str, topic: str, cycle: int) -> None:
 def get_topics(persona_id: str) -> list[dict]:
     conn = _connect()
     rows = conn.execute(
-        "SELECT topic, strength, research_count, last_cycle FROM topics WHERE persona_id = ? ORDER BY strength DESC",
+        "SELECT topic, strength, research_count, last_cycle, parent_topic, origin_interest FROM topics WHERE persona_id = ? ORDER BY strength DESC",
         (persona_id,)
     ).fetchall()
     conn.close()

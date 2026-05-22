@@ -154,6 +154,35 @@ class AutoLearner:
             pass
         return None
 
+    async def _extract_parent_topic(self, specific_topic: str, origin_interest: str) -> str | None:
+        """Extrai a categoria intermédia entre o interesse fixo e o tópico específico."""
+        prompt = (
+            f"Tópico específico descoberto: '{specific_topic}'\n"
+            f"Interesse de origem: '{origin_interest}'\n\n"
+            f"Existe uma CATEGORIA INTERMÉDIA natural entre o interesse e o tópico?\n"
+            f"Exemplos:\n"
+            f"  'jardins zen japoneses' + 'família' → 'Jardinagem'\n"
+            f"  'curadoria afetiva do lar atemporal' + 'família' → 'Curadoria do lar'\n"
+            f"  'materialismo histórico de Marx' + 'comunismo' → null (é directamente do interesse)\n\n"
+            f"Se o tópico pertencer directamente ao interesse sem nível intermédio, responde apenas: null\n"
+            f"Caso contrário, responde APENAS com o nome da categoria (2-4 palavras). Zero explicações."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    f"{LM_STUDIO_URL}/v1/chat/completions",
+                    json={"model": MODELS["gemma-lite"], "messages": [{"role": "user", "content": prompt}],
+                          "stream": False, "max_tokens": 12, "temperature": 0.2},
+                )
+                result = r.json()["choices"][0]["message"]["content"].strip().strip('"\'.,').split("\n")[0].strip()
+            if result.lower() in ("null", "none", "", "nenhum", "n/a", "nenhuma"):
+                return None
+            if 3 <= len(result) <= 40:
+                return result
+        except Exception:
+            pass
+        return None
+
     async def _extract_subtopic(self, broad_interest: str, insights: list[str]) -> str | None:
         """Dado um interesse amplo e os factos extraídos, devolve o conceito específico explorado."""
         if not insights:
@@ -284,6 +313,7 @@ class AutoLearner:
                 discovery = True
                 synthesis = False
                 print(f"[AutoLearner] {name} [{cycle}] → 🔭 descoberta: '{interest}'")
+        origin_interest = interest if not discovery else None  # guarda o interesse fixo de origem
         self.current = {"persona": name, "persona_id": persona_id, "interest": interest, "status": "pesquisando", "discovery": discovery, "started": self._now()}
         results = await web_search(f"{interest} research news ideas 2025")
         print(f"[AutoLearner] {name} → {len(results)} resultados")
@@ -300,12 +330,20 @@ class AutoLearner:
             if specific and specific.lower() != interest.lower():
                 print(f"[AutoLearner] {name} → sub-tópico: '{specific}'")
                 interest = specific
+
+        # extrai categoria intermédia (ex: "jardins zen japoneses" + "família" → "Jardinagem")
+        parent_topic: str | None = None
+        if origin_interest and interest.lower() != origin_interest.lower():
+            parent_topic = await self._extract_parent_topic(interest, origin_interest)
+            if parent_topic:
+                print(f"[AutoLearner] {name} → categoria: '{parent_topic}' (de '{origin_interest}')")
+
         print(f"[AutoLearner] {name} → {len(insights)} insights extraídos")
         ts = self._now()
         for insight in insights:
             upsert_memory(str(uuid.uuid4()), insight, source=f"self_{persona_id}|{interest}", timestamp=ts)
-        # regista o tópico com o ciclo actual (para decaimento)
-        upsert_topic(persona_id, interest, cycle)
+        # regista o tópico com ciclo, hierarquia e origem
+        upsert_topic(persona_id, interest, cycle, parent_topic=parent_topic, origin_interest=origin_interest)
         # actualiza o knowledge graph com o tópico aprendido
         try:
             domain_id = f"{persona_id}_{interest.lower().replace(' ', '_')}"
@@ -1106,6 +1144,26 @@ async def _defrag_persona_memory(persona_id: str, reasoning_model_id: str) -> di
                 upsert_topic_edge(persona_id, ta, tb, round(sim, 3))
                 degree[ta] += 1
                 degree[tb] += 1
+
+    # atribui parent_topic a tópicos órfãos (sem categoria intermédia)
+    persona_data = _load_persona_file(persona_id) or {}
+    fixed_interests = persona_data.get("interests", [])
+    orphans = [t for t in get_topics(persona_id)
+               if not t.get("parent_topic") and t["topic"] not in fixed_interests]
+    if orphans and auto_learner:
+        assigned = 0
+        for t in orphans[:15]:  # processa até 15 por defrag para não sobrecarregar
+            origin = t.get("origin_interest") or (fixed_interests[0] if fixed_interests else None)
+            if not origin:
+                continue
+            parent = await auto_learner._extract_parent_topic(t["topic"], origin)
+            if parent:
+                upsert_topic(persona_id, t["topic"], t["last_cycle"],
+                             parent_topic=parent, origin_interest=t.get("origin_interest"))
+                assigned += 1
+        if assigned:
+            print(f"[Defrag] {persona_id} → {assigned} tópicos com parent_topic atribuído")
+        stats["parents_assigned"] = assigned
 
     return stats
 

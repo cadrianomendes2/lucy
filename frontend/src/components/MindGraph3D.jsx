@@ -32,16 +32,31 @@ function buildGraphData(persona, learnedTopics, topicEdges) {
   if (!persona) return { nodes: [], links: [] }
 
   const fixedInterests = persona.interests || []
-  const learnedMap = Object.fromEntries(learnedTopics.map(t => [t.interest, t]))
+  const learnedMap = Object.fromEntries(learnedTopics.map(t => [t.topic || t.interest, t]))
   const activeLearned = learnedTopics.filter(t => (t.strength || 1) >= 0.3)
-  const allTopics = [...new Set([...fixedInterests, ...activeLearned.map(t => t.interest)])]
+  const specificTopics = activeLearned.map(t => t.topic || t.interest)
+  const allTopics = [...new Set([...fixedInterests, ...specificTopics])]
   const maxStrength = Math.max(1, ...learnedTopics.map(t => t.strength || 1))
 
   // cor base por interesse fixo
   const fixedColorMap = {}
   fixedInterests.forEach((int, i) => { fixedColorMap[int] = BRANCH_PALETTE[i % BRANCH_PALETTE.length] })
 
-  // adjacência semântica para BFS
+  // nós de categoria intermédia (parent_topic únicos)
+  const categoryMap = {} // parentTopic → { color, originInterest }
+  for (const t of activeLearned) {
+    const parent = t.parent_topic
+    const origin = t.origin_interest
+    if (parent && !fixedInterests.includes(parent) && !categoryMap[parent]) {
+      const col = origin && fixedColorMap[origin]
+        ? lighten(fixedColorMap[origin], 0.25)
+        : FALLBACK_COLOR
+      categoryMap[parent] = { color: col, originInterest: origin }
+    }
+  }
+  const categoryIds = Object.keys(categoryMap).map(p => `__cat__${p}`)
+
+  // adjacência semântica para BFS (só tópicos específicos e fixos)
   const semAdj = {}
   for (const t of allTopics) semAdj[t] = []
   for (const e of topicEdges) {
@@ -51,7 +66,6 @@ function buildGraphData(persona, learnedTopics, topicEdges) {
     }
   }
 
-  // BFS para encontrar o interesse fixo mais próximo de um tópico descoberto
   function nearestFixed(start) {
     if (fixedInterests.includes(start)) return start
     const visited = new Set([start])
@@ -69,21 +83,27 @@ function buildGraphData(persona, learnedTopics, topicEdges) {
   const semDegree = {}
   for (const t of allTopics) semDegree[t] = (semAdj[t] || []).length
 
+  // ── Nodes ──────────────────────────────────────────────────────────────────
+
   const nodes = [
+    // persona
     {
-      id: '__persona__',
-      label: persona.name || '?',
-      isPersona: true,
-      avatarUrl: persona.avatar_url || '',
-      val: 30,
-      color: '#00a884',
-      isFixed: false,
-      isWeak: false,
-      isEmergent: false,
-      factCount: 0,
-      strength: 99,
-      fx: 0, fy: 0, fz: 0,  // ancora no origem para a rotação funcionar
+      id: '__persona__', label: persona.name || '?',
+      isPersona: true, avatarUrl: persona.avatar_url || '',
+      val: 30, color: '#00a884',
+      isFixed: false, isWeak: false, isEmergent: false, isCategory: false,
+      factCount: 0, strength: 99,
+      fx: 0, fy: 0, fz: 0,
     },
+    // nós de categoria intermédia
+    ...Object.entries(categoryMap).map(([parent, meta]) => ({
+      id: `__cat__${parent}`, label: parent,
+      isPersona: false, isFixed: false, isWeak: false, isEmergent: false, isCategory: true,
+      val: 8, color: meta.color,
+      strength: 2, factCount: 0,
+      branchRoot: meta.originInterest,
+    })),
+    // interesses fixos + tópicos específicos
     ...allTopics.map((topic, i) => {
       const topicData = learnedMap[topic]
       const strength   = topicData?.strength || 0
@@ -100,35 +120,62 @@ function buildGraphData(persona, learnedTopics, topicEdges) {
       } else if (isFixed) {
         color = fixedColorMap[topic] || BRANCH_PALETTE[i % BRANCH_PALETTE.length]
       } else {
-        const nf = nearestFixed(topic)
-        color = nf ? lighten(fixedColorMap[nf], 0.45) : FALLBACK_COLOR
+        // tenta usar origin_interest do topicData; fallback BFS
+        const origin = topicData?.origin_interest
+        const base = (origin && fixedColorMap[origin]) ? fixedColorMap[origin] : (fixedColorMap[nearestFixed(topic)] || null)
+        color = base ? lighten(base, 0.45) : FALLBACK_COLOR
       }
 
       return {
         id: topic, label: topic,
-        isPersona: false, isFixed, isWeak, isEmergent,
+        isPersona: false, isFixed, isWeak, isEmergent, isCategory: false,
         strength, semDegree: semDegree[topic],
         factCount: topicData?.count || 0,
         val, color,
-        branchRoot: nearestFixed(topic),
+        branchRoot: topicData?.origin_interest || nearestFixed(topic),
+        parentTopic: topicData?.parent_topic || null,
       }
     }),
   ]
+
+  // ── Links ──────────────────────────────────────────────────────────────────
 
   const semanticSet = new Set(
     topicEdges.flatMap(e => [e.topic_a, e.topic_b]).filter(t => allTopics.includes(t))
   )
 
+  // tópicos específicos com parent_topic definido
+  const topicsWithParent = new Set(
+    activeLearned.filter(t => t.parent_topic).map(t => t.topic || t.interest)
+  )
+
   const links = [
-    // persona → interesses fixos (âncoras da identidade)
+    // persona → interesses fixos
     ...fixedInterests.filter(t => allTopics.includes(t)).map(topic => ({
       source: '__persona__', target: topic,
       isSemantic: false, isFallback: false, semWeight: 0,
       color: fixedColorMap[topic] || '#00a884',
     })),
-    // tópicos descobertos sem arestas semânticas → ligação fantasma ao centro
+    // interesse fixo → categoria intermédia
+    ...Object.entries(categoryMap).map(([parent, meta]) => ({
+      source: meta.originInterest && fixedInterests.includes(meta.originInterest)
+        ? meta.originInterest : '__persona__',
+      target: `__cat__${parent}`,
+      isSemantic: false, isFallback: false, semWeight: 0,
+      color: meta.color,
+    })),
+    // categoria → tópico específico
+    ...activeLearned
+      .filter(t => t.parent_topic)
+      .map(t => ({
+        source: `__cat__${t.parent_topic}`,
+        target: t.topic || t.interest,
+        isSemantic: false, isFallback: false, semWeight: 0,
+        color: categoryMap[t.parent_topic]?.color || FALLBACK_COLOR,
+      })),
+    // fallback: tópicos sem parent_topic e sem arestas semânticas → persona
     ...allTopics
-      .filter(t => !fixedInterests.includes(t) && !semanticSet.has(t))
+      .filter(t => !fixedInterests.includes(t) && !semanticSet.has(t) && !topicsWithParent.has(t))
       .map(t => ({
         source: '__persona__', target: t,
         isSemantic: false, isFallback: true, semWeight: 0,
