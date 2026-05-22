@@ -1375,8 +1375,11 @@ function ChatPage({
   function toggleVoice() {
     if (voiceUuid) {
       setVoiceUuid(null)
+      localStorage.setItem('voice_enabled', '0')
     } else {
-      setVoiceUuid(availableVoices[0]?.uuid ?? 'default')
+      const uuid = availableVoices[0]?.uuid ?? 'default'
+      setVoiceUuid(uuid)
+      localStorage.setItem('voice_enabled', '1')
     }
   }
 
@@ -2813,7 +2816,7 @@ export default function App() {
   const [model, setModel] = useState('gemma-lite')
   const [thinkingMode, setThinkingMode] = useState('off')
   const [language, setLanguage] = useState('pt')
-  const [voiceUuid, setVoiceUuid] = useState(null)
+  const [voiceUuid, setVoiceUuid] = useState(null) // null = desligado; restaurado após seleccionar persona
   const [persona, setPersona] = useState({ name: 'Lucy', avatar_url: '' })
   const [sessionId, setSessionId] = useState(null)
   const [chatKey, setChatKey] = useState(0)
@@ -2830,8 +2833,19 @@ export default function App() {
   }
 
   useEffect(() => {
-    fetch('/api/personas').then(r => r.json()).then(d => setChatPersonas(Array.isArray(d) ? d : [])).catch(() => {})
-  }, [])
+    fetch('/api/personas').then(r => r.json()).then(d => {
+      const list = Array.isArray(d) ? d : []
+      setChatPersonas(list)
+      // restaura persona e contacto seleccionados da sessão anterior
+      const savedId = localStorage.getItem('last_persona_id')
+      const savedSession = localStorage.getItem('last_session_id')
+      const saved = savedId && list.find(p => p.id === savedId)
+      if (saved) {
+        handleSelectPersona(saved)
+        if (savedSession) setSessionId(Number(savedSession))
+      }
+    }).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // fecha o painel direito automaticamente em janelas pequenas
   useEffect(() => {
@@ -2876,11 +2890,13 @@ export default function App() {
 
   function handleSessionCreated(id) {
     setSessionId(id)
+    localStorage.setItem('last_session_id', id)
     setSidebarKey(k => k + 1)
   }
 
   async function handleSelectPersona(p) {
     setPersona({ name: p.name, avatar_url: p.avatar_url, id: p.id, defaults: p.defaults, enabled: p.enabled, interests: p.interests || [] })
+    localStorage.setItem('last_persona_id', p.id)
     // resolve modelo: usa o da persona se estiver carregado, senão usa o primeiro carregado
     const wantedModel = p.defaults?.model
     if (wantedModel) {
@@ -2897,7 +2913,12 @@ export default function App() {
       }
     }
     if (p.defaults?.language) setLanguage(p.defaults.language)
-    if (p.defaults?.voice_uuid !== undefined) setVoiceUuid(p.defaults.voice_uuid || null)
+    // respeita preferência de áudio do utilizador — só activa se não tiver desligado explicitamente
+    if (localStorage.getItem('voice_enabled') !== '0' && p.defaults?.voice_uuid) {
+      setVoiceUuid(p.defaults.voice_uuid)
+    } else if (localStorage.getItem('voice_enabled') === '0') {
+      setVoiceUuid(null)
+    }
     setContactSelected(true)
     // actualiza PERSONA global no backend
     fetch('/api/persona/switch', {

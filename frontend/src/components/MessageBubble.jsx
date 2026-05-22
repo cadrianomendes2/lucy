@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 // Renderiza markdown inline simples: **bold**, *italic*, `code`, listas numeradas e com hífen
 function renderMarkdown(text) {
   if (!text) return null
@@ -5,13 +7,10 @@ function renderMarkdown(text) {
   const elements = []
 
   lines.forEach((line, li) => {
-    // linha vazia
     if (!line.trim()) {
       elements.push(<br key={`br-${li}`} />)
       return
     }
-
-    // lista numerada: "1. texto" ou "1.  texto"
     const numMatch = line.match(/^(\d+)\.\s+(.*)/)
     if (numMatch) {
       elements.push(
@@ -22,8 +21,6 @@ function renderMarkdown(text) {
       )
       return
     }
-
-    // lista com hífen ou asterisco: "- texto" ou "* texto"
     const bulletMatch = line.match(/^[-*]\s+(.*)/)
     if (bulletMatch) {
       elements.push(
@@ -34,18 +31,14 @@ function renderMarkdown(text) {
       )
       return
     }
-
-    // linha normal
     elements.push(<span key={li} style={{ display: 'block' }}>{inlineMarkdown(line)}</span>)
   })
 
   return elements
 }
 
-// Processa bold, italic e code dentro de uma linha
 function inlineMarkdown(text) {
   const parts = []
-  // tokeniza **bold**, *italic*, `code`
   const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
   let last = 0, m
   while ((m = re.exec(text)) !== null) {
@@ -59,21 +52,21 @@ function inlineMarkdown(text) {
   return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts
 }
 
-export default function MessageBubble({ message, personaName }) {
+export default function MessageBubble({ message, personaName, onDelete, onRegenerate, onPlay }) {
+  const [hovered, setHovered] = useState(false)
   const isUser = message.role === 'user'
   const isTyping = !isUser && message.streaming && !message.content
-
   const content = message.streaming ? message.content : message.content?.trim()
   const hasMarkdown = !isUser && content && /\*\*|^\d+\.\s|^[-*]\s/m.test(content)
+  const showActions = hovered && !message.streaming && content
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: isUser ? 'flex-end' : 'flex-start',
-      marginBottom: 4,
-      padding: '0 16px',
-    }}>
-      <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '66%' }}>
+    <div
+      style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 4, padding: '0 16px' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '66%', position: 'relative' }}>
         {!isUser && (
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', marginBottom: 3, paddingLeft: 2 }}>
             {personaName || 'Lucy'}
@@ -123,7 +116,53 @@ export default function MessageBubble({ message, personaName }) {
             </>
           )}
         </div>
+
+        {/* Botões de acção — aparecem discretamente ao fazer hover */}
+        {showActions && (
+          <div style={{
+            display: 'flex', gap: 4,
+            marginTop: 3,
+            justifyContent: isUser ? 'flex-end' : 'flex-start',
+            animation: 'fadeIn 0.15s ease',
+          }}>
+            {!isUser && onPlay && (
+              <ActionBtn title="Ouvir" onClick={() => onPlay(content)}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </ActionBtn>
+            )}
+            {!isUser && onRegenerate && (
+              <ActionBtn title="Regenerar" onClick={onRegenerate}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-4.78L1 10"/></svg>
+              </ActionBtn>
+            )}
+            {onDelete && (
+              <ActionBtn title="Apagar" onClick={onDelete} danger>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+              </ActionBtn>
+            )}
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+function ActionBtn({ children, onClick, title, danger }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 24, height: 24, borderRadius: 6,
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        color: danger ? '#ef4444' : 'var(--text-muted)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', padding: 0,
+        transition: 'opacity 0.1s',
+      }}
+    >
+      {children}
+    </button>
   )
 }

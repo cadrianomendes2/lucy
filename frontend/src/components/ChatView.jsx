@@ -339,7 +339,19 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
         )}
         {messages.map((msg, i) => (
           <div key={i}>
-            <MessageBubble message={msg} personaName={personaName} />
+            <MessageBubble
+              message={msg}
+              personaName={personaName}
+              onDelete={() => setMessages(prev => prev.filter((_, idx) => idx !== i))}
+              onPlay={msg.role === 'assistant' ? (text) => enqueueTTS(text, i) : null}
+              onRegenerate={msg.role === 'assistant' ? () => {
+                // encontra a última mensagem do utilizador antes desta
+                const userMsg = [...messages].slice(0, i).reverse().find(m => m.role === 'user')
+                if (!userMsg) return
+                setMessages(prev => prev.slice(0, i)) // remove esta e posteriores
+                sendMessage(userMsg.content)
+              } : null}
+            />
             {/* Controlos TTS — estilo WhatsApp, só na mensagem activa */}
             {msg.role === 'assistant' && ttsState?.msgIdx === i && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '-4px 20px 8px', paddingLeft: 4 }}>
