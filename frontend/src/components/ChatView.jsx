@@ -63,8 +63,10 @@ function buildHistory(msgs) {
   return result
 }
 
-export default function ChatView({ model, thinkingMode, language, voiceUuid, onAnimation, sessionId, onSessionCreated, pro, personaId, personaEnabled = true, personaName }) {
+export default function ChatView({ model, thinkingMode, language, voiceUuid, onAnimation, sessionId, onSessionCreated, pro, personaId, personaEnabled = true, personaName, roleplayMode, onRoleplayClose }) {
   const [messages, setMessages] = useState([])
+  const [scenario, setScenario] = useState('')
+  const [improving, setImproving] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [searchingQuery, setSearchingQuery] = useState(null)
@@ -492,6 +494,84 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
           }}
         />
       )}
+      {/* ── Painel Roleplay ── */}
+      {roleplayMode && pro && (
+        <div style={{
+          padding: '12px 16px 10px',
+          borderTop: '2px solid #7c3aed44',
+          background: 'var(--surface)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: '#7c3aed', letterSpacing: '0.08em' }}>ROLEPLAY</span>
+            <button onClick={onRoleplayClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
+          </div>
+          <textarea
+            value={scenario}
+            onChange={e => setScenario(e.target.value)}
+            placeholder="Descreve o cenário… (personagens, contexto, tom, o que queres explorar)"
+            rows={3}
+            style={{
+              width: '100%', resize: 'vertical', minHeight: 64, maxHeight: 180,
+              background: 'var(--surface2)', color: 'var(--text)',
+              border: '1px solid #7c3aed44', borderRadius: 10,
+              padding: '8px 10px', fontSize: 13, lineHeight: 1.5,
+              fontFamily: 'inherit', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }}>
+            {/* Varinha — melhora o cenário */}
+            <button
+              onClick={async () => {
+                if (!scenario.trim() || improving) return
+                setImproving(true)
+                try {
+                  const r = await fetch('/api/roleplay/improve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scenario: scenario.trim(), persona_id: personaId }),
+                  })
+                  const d = await r.json()
+                  if (d.improved) setScenario(d.improved)
+                } catch {}
+                setImproving(false)
+              }}
+              disabled={!scenario.trim() || improving}
+              title="Melhorar cenário com IA"
+              style={{
+                height: 32, padding: '0 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                border: '1px solid #7c3aed44', background: 'none',
+                color: improving ? 'var(--text-muted)' : '#7c3aed',
+                cursor: !scenario.trim() || improving ? 'default' : 'pointer',
+                opacity: !scenario.trim() || improving ? 0.5 : 1,
+                transition: 'all 0.12s',
+              }}
+            >
+              {improving ? 'A melhorar…' : '✦ Melhorar'}
+            </button>
+            {/* Play — começa o roleplay */}
+            <button
+              onClick={() => {
+                if (!scenario.trim() || loading) return
+                const msg = `Começa o roleplay com este cenário:\n\n${scenario.trim()}\n\nEntra em personagem e escreve a primeira cena.`
+                sendMessage(msg)
+              }}
+              disabled={!scenario.trim() || loading}
+              style={{
+                height: 32, padding: '0 14px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                border: 'none', background: '#7c3aed',
+                color: '#fff',
+                cursor: !scenario.trim() || loading ? 'default' : 'pointer',
+                opacity: !scenario.trim() || loading ? 0.5 : 1,
+                transition: 'all 0.12s',
+              }}
+            >
+              Começar
+            </button>
+          </div>
+        </div>
+      )}
+
       <MessageInput onSend={sendMessage} loading={loading} disabled={!personaEnabled} />
     </div>
   )

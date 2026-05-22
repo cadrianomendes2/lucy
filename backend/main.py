@@ -1578,6 +1578,34 @@ def health():
     return {"status": "ok"}
 
 
+# ── Roleplay ──────────────────────────────────────────────────────────────────
+
+class RoleplayImproveRequest(BaseModel):
+    scenario: str
+    persona_id: str | None = None
+
+@app.post("/api/roleplay/improve")
+async def roleplay_improve(req: RoleplayImproveRequest):
+    persona_data = _load_persona_file(req.persona_id) if req.persona_id else {}
+    persona_name = persona_data.get("name", "a persona")
+    prompt = (
+        f"Melhora este cenário de roleplay para a persona '{persona_name}'.\n\n"
+        f"Cenário original:\n{req.scenario}\n\n"
+        f"Reescreve de forma mais rica, detalhada e imersiva. "
+        f"Mantém o mesmo tom e intenção. Responde APENAS com o cenário melhorado, sem introdução nem comentários."
+    )
+    model_id = MODELS.get("gemma-lite", list(MODELS.values())[0])
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            f"{LM_STUDIO_URL}/v1/chat/completions",
+            json={"model": model_id, "messages": [{"role": "user", "content": prompt}],
+                  "stream": False, "max_tokens": 500, "temperature": 0.8},
+        )
+        r.raise_for_status()
+        improved = r.json()["choices"][0]["message"]["content"].strip()
+    return {"improved": improved}
+
+
 # ── AutoLearner endpoints ─────────────────────────────────────────────────────
 
 class AutoLearnConfig(BaseModel):

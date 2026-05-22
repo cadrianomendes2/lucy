@@ -986,7 +986,7 @@ function ContactProfile({ persona, pro, onTogglePro, onStartChat, onBack, stats 
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               }}
             >
-              {showPro ? '✦ PRO · aba privada' : '🔒 Entrar em Pro'}
+              {showPro ? 'PRO · aba privada' : 'Entrar em Pro'}
             </button>
           </div>
         )}
@@ -1367,6 +1367,7 @@ function ChatPage({
   onClearChat,
 }) {
   const [availableVoices, setAvailableVoices] = useState([])
+  const [roleplayMode, setRoleplayMode] = useState(false)
 
   useEffect(() => {
     fetch('/api/voices').then(r => r.json()).then(d => setAvailableVoices(Array.isArray(d) ? d : [])).catch(() => {})
@@ -1425,6 +1426,23 @@ function ChatPage({
 
         {/* Direita: voz + modelo + Pro */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+
+          {/* Roleplay — só em Pro */}
+          {pro && (
+            <button
+              onClick={() => setRoleplayMode(v => !v)}
+              title="Modo Roleplay"
+              style={{
+                height: 32, padding: '0 10px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                border: `1px solid ${roleplayMode ? '#7c3aed' : 'var(--border)'}`,
+                background: roleplayMode ? 'rgba(124,58,237,0.1)' : 'none',
+                color: roleplayMode ? '#7c3aed' : 'var(--text-muted)',
+                cursor: 'pointer', letterSpacing: '0.04em', transition: 'all 0.12s',
+              }}
+            >
+              Roleplay
+            </button>
+          )}
 
           {/* Toggle voz — minimalista */}
           <button
@@ -1504,6 +1522,8 @@ function ChatPage({
           personaId={persona?.id}
           personaEnabled={persona?.enabled !== false}
           personaName={persona?.name}
+          roleplayMode={roleplayMode}
+          onRoleplayClose={() => setRoleplayMode(false)}
         />
       ) : (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, color: 'var(--text-muted)', background: 'var(--surface2)' }}>
@@ -2057,7 +2077,6 @@ function MindPage({ model, language, darkMode }) {
                     fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4,
                   }}
                 >
-                  {defragging ? '⏳' : blocked ? '🔒' : '⚙'}
                   {defragging ? 'A desfragmentar…'
                     : inCooldown ? `Defrag (${defragStatus.cooldown_remaining_h}h)`
                     : lowScore ? `Defrag (${Math.round((defragStatus?.frag_ratio || 0) * 100)}%)`
