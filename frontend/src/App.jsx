@@ -1474,8 +1474,8 @@ function ChatPage({
         {/* Direita: voz + modelo + Pro */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
 
-          {/* Roleplay — só em Pro, visual dourado premium */}
-          {pro && (
+          {/* Roleplay — sempre visível, visual dourado premium */}
+          {(
             <button
               onClick={() => setRoleplayMode(v => !v)}
               title="Modo Roleplay"
