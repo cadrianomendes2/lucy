@@ -275,18 +275,24 @@ export default function MindGraph3D({ persona, learnedTopics, topicEdges, select
     return () => clearTimeout(timer)
   }, [graphData])
 
-  // Auto-rotação à volta da origem (onde o nó persona está ancorado)
+  // Auto-rotação à volta da origem — preserva o zoom actual do utilizador
   useEffect(() => {
-    const R = 240
+    const R_DEFAULT = 240
 
     function tick() {
       if (fgRef.current && !isDragging.current) {
         angleRef.current += 0.003
-        fgRef.current.cameraPosition(
-          { x: R * Math.sin(angleRef.current), y: 60, z: R * Math.cos(angleRef.current) },
-          { x: 0, y: 0, z: 0 },
-          0
-        )
+        const cam = fgRef.current.camera()
+        if (cam) {
+          // distância horizontal actual (preserva o zoom feito pelo utilizador via scroll)
+          const hDist = Math.sqrt(cam.position.x ** 2 + cam.position.z ** 2)
+          const R = hDist > 10 ? hDist : R_DEFAULT
+          fgRef.current.cameraPosition(
+            { x: R * Math.sin(angleRef.current), y: cam.position.y, z: R * Math.cos(angleRef.current) },
+            { x: 0, y: 0, z: 0 },
+            0
+          )
+        }
       }
       rotRef.current = requestAnimationFrame(tick)
     }

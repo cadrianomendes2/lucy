@@ -1638,6 +1638,9 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
   const [dims, setDims] = useState({ w: 400, h: 400 })
   const [learnedTopics, setLearnedTopics] = useState([])
   const [topicEdges, setTopicEdges] = useState([])
+  const [zoom, setZoom] = useState({ x: 0, y: 0, scale: 1 })
+  const isPanning = useRef(false)
+  const panStart = useRef({ x: 0, y: 0 })
 
   useEffect(() => {
     if (!persona?.id) return
@@ -1688,11 +1691,49 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
   const py = (pct) => (pct / 100) * dims.h
   const totalFacts = learnedTopics.reduce((s, t) => s + t.count, 0)
 
+  function handleWheel(e) {
+    e.preventDefault()
+    const rect = svgRef.current.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const factor = e.deltaY < 0 ? 1.12 : 0.89
+    setZoom(z => {
+      const newScale = Math.max(0.25, Math.min(6, z.scale * factor))
+      return {
+        scale: newScale,
+        x: mx - (mx - z.x) * (newScale / z.scale),
+        y: my - (my - z.y) * (newScale / z.scale),
+      }
+    })
+  }
+
+  function handleMouseDown(e) {
+    if (e.button !== 0) return
+    isPanning.current = true
+    panStart.current = { x: e.clientX - zoom.x, y: e.clientY - zoom.y }
+  }
+
+  function handleMouseMove(e) {
+    if (!isPanning.current) return
+    setZoom(z => ({ ...z, x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y }))
+  }
+
+  function handleMouseUp() { isPanning.current = false }
+
   return (
-    <svg ref={svgRef} width="100%" height="100%" style={{ display: 'block', flex: 1 }}>
+    <svg
+      ref={svgRef} width="100%" height="100%" style={{ display: 'block', flex: 1, cursor: isPanning.current ? 'grabbing' : 'grab' }}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
       <text x={8} y={16} fontSize={9} fill="#9ca3af">
-        ● anel interno = forte/fixo  ○ anel externo = descoberto  — linha roxa = relacionado ({totalFacts} factos)
+        ● anel interno = forte/fixo  ○ anel externo = descoberto  — linha roxa = relacionado ({totalFacts} factos) · scroll = zoom · arrastar = mover
       </text>
+
+      <g transform={`translate(${zoom.x},${zoom.y}) scale(${zoom.scale})`}>
 
       {/* Linhas estruturais (centro→nó, nó→nó hierárquico) */}
       {links.map(([a, b], i) => {
@@ -1746,6 +1787,8 @@ function PersonaGraph({ persona, selectedNode, onSelectNode }) {
           </g>
         )
       })}
+
+      </g>{/* fim do grupo zoom/pan */}
     </svg>
   )
 }
