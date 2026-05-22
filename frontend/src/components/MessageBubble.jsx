@@ -52,13 +52,19 @@ function inlineMarkdown(text) {
   return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts
 }
 
-export default function MessageBubble({ message, personaName, onDelete, onRegenerate, onPlay }) {
+function formatTime(ts) {
+  if (!ts) return ''
+  return new Date(ts).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+}
+
+export default function MessageBubble({ message, personaName, timestamp, onDelete, onRegenerate, onPlay }) {
   const [hovered, setHovered] = useState(false)
   const isUser = message.role === 'user'
   const isTyping = !isUser && message.streaming && !message.content
   const content = message.streaming ? message.content : message.content?.trim()
   const hasMarkdown = !isUser && content && /\*\*|^\d+\.\s|^[-*]\s/m.test(content)
   const showActions = hovered && !message.streaming && content
+  const timeStr = formatTime(timestamp || message.timestamp)
 
   return (
     <div
@@ -110,8 +116,17 @@ export default function MessageBubble({ message, personaName, onDelete, onRegene
               {message.streaming && content && (
                 <span style={{ display: 'inline-block', width: 7, height: 12, background: 'var(--accent)', marginLeft: 2, borderRadius: 1, animation: 'blink 1s step-end infinite' }} />
               )}
-              {isUser && !message.streaming && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 5, fontSize: 11, color: '#53bdeb', verticalAlign: 'bottom' }}>✓✓</span>
+              {/* Hora + confirmação (estilo WhatsApp) */}
+              {!message.streaming && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  float: 'right', marginLeft: 8, marginTop: 2,
+                  fontSize: 11, color: 'var(--text-muted)', opacity: 0.7,
+                  verticalAlign: 'bottom', userSelect: 'none',
+                }}>
+                  {timeStr}
+                  {isUser && <span style={{ color: '#53bdeb' }}>✓✓</span>}
+                </span>
               )}
             </>
           )}

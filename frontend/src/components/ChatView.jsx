@@ -26,6 +26,29 @@ async function fetchTTSAudio(text, voiceUuid) {
 
 const PLEASEME_DURATION = 4000
 
+function formatTime(ts) {
+  if (!ts) return ''
+  return new Date(ts).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDateSep(ts) {
+  if (!ts) return null
+  const d = new Date(ts)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diff = Math.round((today - msgDay) / 86400000)
+  if (diff === 0) return 'Hoje'
+  if (diff === 1) return 'Ontem'
+  if (diff < 7) return d.toLocaleDateString('pt-PT', { weekday: 'short', day: '2-digit', month: '2-digit' })
+  return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })
+}
+
+function isSameDay(ts1, ts2) {
+  if (!ts1 || !ts2) return true
+  return new Date(ts1).toDateString() === new Date(ts2).toDateString()
+}
+
 // junta mensagens consecutivas do mesmo role para o histórico
 function buildHistory(msgs) {
   const result = []
@@ -86,12 +109,13 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
       .then(msgs => {
         const expanded = []
         for (const m of msgs) {
+          const ts = m.timestamp || null
           if (m.role === 'assistant' && m.content.includes('\n\n')) {
             m.content.split('\n\n').filter(p => p.trim()).forEach(p =>
-              expanded.push({ role: m.role, content: p.trim() })
+              expanded.push({ role: m.role, content: p.trim(), timestamp: ts })
             )
           } else {
-            expanded.push({ role: m.role, content: m.content })
+            expanded.push({ role: m.role, content: m.content, timestamp: ts })
           }
         }
         setMessages(expanded)
@@ -156,7 +180,8 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
       return
     }
 
-    const userMsg = { role: 'user', content: text, image: image || null }
+    const now = new Date().toISOString()
+    const userMsg = { role: 'user', content: text, image: image || null, timestamp: now }
     const history = buildHistory(messages.map(m => ({ role: m.role, content: m.content })))
 
     setMessages(prev => [...prev, userMsg])
@@ -172,7 +197,7 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
     let inDelay = false   // true = a mostrar "a digitar" antes do próximo parágrafo
     let finalText = ''
 
-    setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true }])
+    setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true, timestamp: now }])
 
     try {
       const response = await fetch('/api/chat', {
@@ -337,18 +362,29 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
             Começa uma conversa
           </div>
         )}
-        {messages.map((msg, i) => (
+        {messages.map((msg, i) => {
+          const prevMsg = messages[i - 1]
+          const showSep = msg.timestamp && !isSameDay(msg.timestamp, prevMsg?.timestamp)
+          const sepLabel = showSep ? formatDateSep(msg.timestamp) : null
+          return (
           <div key={i}>
+            {sepLabel && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '12px 0 8px' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 12px', userSelect: 'none' }}>
+                  {sepLabel}
+                </span>
+              </div>
+            )}
             <MessageBubble
               message={msg}
               personaName={personaName}
+              timestamp={msg.timestamp}
               onDelete={() => setMessages(prev => prev.filter((_, idx) => idx !== i))}
               onPlay={msg.role === 'assistant' ? (text) => enqueueTTS(text, i) : null}
               onRegenerate={msg.role === 'assistant' ? () => {
-                // encontra a última mensagem do utilizador antes desta
                 const userMsg = [...messages].slice(0, i).reverse().find(m => m.role === 'user')
                 if (!userMsg) return
-                setMessages(prev => prev.slice(0, i)) // remove esta e posteriores
+                setMessages(prev => prev.slice(0, i))
                 sendMessage(userMsg.content)
               } : null}
             />
@@ -404,7 +440,9 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
+
         {searchingQuery && (
           <div style={{
             margin: '4px 20px 8px',
