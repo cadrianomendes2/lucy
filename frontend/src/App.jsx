@@ -1069,8 +1069,8 @@ function ContactProfile({ persona, pro, onTogglePro, roleplayMode, onToggleRolep
                 transition: 'all 0.2s',
               }}
             >
-              <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: '0.08em', color: companionMode ? '#3b82f6' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ fontSize: 14 }}>📞</span> Companion
+              <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: '0.08em', color: companionMode ? '#3b82f6' : 'var(--text-muted)' }}>
+                Companion
               </span>
               <div style={{
                 width: 36, height: 20, borderRadius: 10,

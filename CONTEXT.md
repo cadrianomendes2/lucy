@@ -1,13 +1,59 @@
 # CONTEXT.md — Handoff de Sessão
 
 ## Estado Actual
-**Data:** 2026-05-19
-**Sessão:** #5
-**Feature em progresso:** V0.4 Fase 1 concluída — Mente Distribuída (base de grafos + research)
+**Data:** 2026-05-22
+**Sessão:** #6
+**Feature concluída:** Companion Mode (PRO) — passatempo, trabalho, stroke
 
 ---
 
-## O que foi feito nesta sessão
+## O que foi feito nesta sessão (2026-05-22)
+
+### Companion Mode (PRO)
+
+Nova feature PRO paralela ao Roleplay. Quando activa, a persona fica no "ouvido" do utilizador e envia mensagens espontâneas — sem necessidade de interacção. Três sub-modos:
+
+#### Backend — `POST /api/companion/message`
+- **Request:** `{ persona_id, sub_mode, model, session_id?, work_context?, research_mode, research_topic?, language }`
+- **Response:** `{ message, research_done }`
+- Carrega system prompt da persona + instrução por sub-modo
+- Busca histórico recente da sessão (últimas 6 msgs) para continuidade
+- Guarda resposta na sessão via `log_turn()`
+- **passatempo:** `research_mode=true` sempre → Tavily pesquisa tema casual aleatório → sintetiza em 1-2 frases casualis ("olha", "haha", "imagina")
+- **trabalho:** `work_context` (código colado) injectado no prompt; persona comenta/pergunta/sugere
+- **stroke:** sem filtros, persona sabe que o utilizador está a masturbar-se, alterna entre ordens, gemidos, cenas explícitas
+
+#### Parâmetros por sub-modo
+| sub_mode | interval | max_tokens | temperature | modelo |
+|---|---|---|---|---|
+| passatempo | 20s | 150 | 0.9 | gemma-26b |
+| trabalho | 60s | 150 | 0.9 | gemma-26b |
+| stroke | 10s | 60 | 1.1 | gemma-lite |
+
+#### Topics de pesquisa casual (passatempo)
+Lista de 12 temas rotacionados aleatoriamente: twitter viral, weird news, interesting facts, funny animals, scientific discoveries, reddit wholesome, world records, food facts, space discoveries, internet moments, unexplained phenomena, celebrity moments.
+
+#### Frontend — `frontend/src/hooks/useCompanionEngine.js` (novo)
+- `useCompanionEngine({ active, subMode, persona, sessionId, model, workContext, onMessage })`
+- `setInterval` por sub-modo; limpa ao desactivar; `busyRef` evita race conditions
+- Para passatempo: sempre envia `research_mode: true` (sem topic → backend escolhe)
+- `companionResearch()` — pesquisa pontual com topic explícito
+
+#### Frontend — `App.jsx`
+- Estado: `companionMode`, `companionSubMode` ('passatempo'|'trabalho'|'stroke')
+- Reset automático ao desactivar PRO
+- Toggle no `ContactProfile` (abaixo de Roleplay): azul, com switch igual ao PRO/Roleplay
+- Sub-modo selector inline (3 botões cor-coded: azul/verde/rosa) aparece quando companion activo
+- Props passados: App → ChatContactsSidebar → ContactProfile; App → ChatPage → ChatView
+
+#### Frontend — `ChatView.jsx`
+- `injectCompanionMessage(text)` — adiciona mensagem ao chat com `{ companion: true }` sem chamar `/api/chat`
+- Indicador "COMPANION · STROKE" no rodapé com ponto pulsante (animation: pulse)
+- Selector de sub-modo inline no indicador
+- Textarea de código (monospace) visível só no sub-modo trabalho
+- `@keyframes pulse` adicionado ao `index.css`
+
+## O que foi feito em sessões anteriores
 
 ### Multi-modelo com LM Studio
 - [x] `MODELS` dict com 8 modelos: nemo-12b, qwen-40b, qwen-9b-auto, gemma-lite, qwen-27b, gemma-26b, gpt-20b, qwen-9b

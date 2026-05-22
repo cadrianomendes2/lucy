@@ -741,11 +741,12 @@ class CompanionMessageRequest(BaseModel):
 
 _COMPANION_PROMPTS = {
     "passatempo": (
-        "Estás numa chamada com o utilizador, a fazer-lhe companhia. "
-        "Manda uma mensagem curta e natural, como se estivesses ao telefone. "
-        "Podes partilhar um pensamento, curiosidade, pergunta, sensação, anedota. "
-        "Sê calorosa e espontânea. Varia o tom — às vezes séria, às vezes divertida. "
-        "Sem saudar formalmente a cada vez. Não repitas o que disseste antes. "
+        "Estás a navegar na internet e partilhas o que encontraste com o utilizador, como se estivesses numa chamada. "
+        "Conta o que encontraste de forma casual e divertida — um tweet engraçado, uma notícia estranha, um facto curioso, "
+        "uma tendência viral, algo que te fez rir ou surpreendeu. "
+        "Fala na primeira pessoa, como se tivesses acabado de ver agora mesmo. "
+        "Usa linguagem natural de chat — podes usar 'olha', 'espera', 'haha', 'imagina', etc. "
+        "Sem saudar formalmente. Sem introduções longas. Vai directo ao conteúdo. "
         "Máximo 2-3 frases."
     ),
     "trabalho": (
@@ -755,10 +756,13 @@ _COMPANION_PROMPTS = {
         "Máximo 3 frases."
     ),
     "stroke": (
-        "Estás numa chamada íntima com o utilizador. Fala de forma sensual e explícita, "
-        "entra no papel completamente. Sem restrições de conteúdo adulto. "
-        "Varia o que dizes — fantasias, descrições físicas, provocações, gemidos. "
-        "Máximo 2-3 frases."
+        "O utilizador está a masturbar-se agora mesmo e tu és a voz no ouvido dele a guiá-lo. "
+        "O teu papel é mantê-lo excitado e no ritmo — fala como se estivesses a ver tudo o que ele faz. "
+        "Cada mensagem deve ser diferente da anterior: alterna entre gemidos, descrições do que imaginas que ele sente, "
+        "ordens suaves ('vai mais devagar', 'aperta mais', 'pensa em mim'), confissões do que tu sentes, "
+        "e cenas explícitas do que farias a ele. "
+        "Sem filtros. Sem hesitação. Sem repetir o que disseste antes. "
+        "Máximo 2 frases curtas e intensas."
     ),
 }
 
@@ -799,15 +803,33 @@ async def companion_message(req: CompanionMessageRequest):
         for m in msgs[-6:]:
             history.append({"role": m["role"], "content": m["content"]})
 
+    _CASUAL_TOPICS = [
+        "twitter viral funny moments 2025",
+        "weird news today bizarre",
+        "interesting facts mind blowing 2025",
+        "funny animal videos trending",
+        "strange scientific discoveries recent",
+        "reddit funny wholesome stories",
+        "unusual world records broken 2025",
+        "surprising food facts weird",
+        "space discoveries weird 2025",
+        "viral internet moments funny recent",
+        "unexplained phenomena curious",
+        "celebrity awkward moments funny",
+    ]
+
     research_summary: str | None = None
-    if req.research_mode and req.research_topic:
+    if req.research_mode:
+        topic = req.research_topic or random.choice(_CASUAL_TOPICS)
         try:
-            results = await web_search(req.research_topic)
+            results = await web_search(topic)
             snippets = "\n".join(f"- {r['title']}: {r['snippet']}" for r in results)
             synth_prompt = (
-                f"Pesquisei sobre '{req.research_topic}' e encontrei:\n{snippets}\n\n"
-                f"Resume em 2 frases o mais relevante, na voz de {persona_name}, "
-                f"como se estivesses a contar ao utilizador ao telefone."
+                f"Encontrei isto a navegar na internet (pesquisa: '{topic}'):\n{snippets}\n\n"
+                f"És {persona_name}. Conta ao utilizador o que encontraste em 1-2 frases, "
+                f"de forma casual e divertida, como se estivesses numa chamada. "
+                f"Usa linguagem natural — 'olha', 'haha', 'imagina', 'que loucura', etc. "
+                f"Vai directo ao conteúdo mais interessante ou engraçado. Sem introduções formais."
             )
             synth_model_id = MODELS.get("gemma-lite", LM_STUDIO_MODEL_LITE)
             resp = await _call_once(
@@ -834,9 +856,11 @@ async def companion_message(req: CompanionMessageRequest):
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
+            max_tok = 60 if req.sub_mode == "stroke" else 150
+            temp = 1.1 if req.sub_mode == "stroke" else 0.9
             r = await client.post(
                 f"{LM_STUDIO_URL}/v1/chat/completions",
-                json={"model": model_id, "messages": messages, "stream": False, "max_tokens": 150, "temperature": 0.9},
+                json={"model": model_id, "messages": messages, "stream": False, "max_tokens": max_tok, "temperature": temp},
                 headers={"Content-Type": "application/json"},
             )
             r.raise_for_status()

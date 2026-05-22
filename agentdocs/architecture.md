@@ -98,6 +98,63 @@ POST /api/persona/switch  { "persona_id": "samantha" }
 | Memória | Partilhada | Partilhada |
 | AutoLearner | Corre | Não corre |
 | Activação | — | PIN 1213 |
+| Roleplay | — | ✓ |
+| Companion | — | ✓ |
+
+### Modos PRO adicionais
+
+#### Roleplay
+Painel no rodapé do chat com selector de modo (Aventura / Desafio / Diversão) e textarea de cenário. A persona entra em personagem e conduz a cena.
+
+#### Companion Mode
+A persona fica activa como se estivesse numa chamada — envia mensagens espontâneas sem interacção do utilizador.
+
+**Endpoint:** `POST /api/companion/message`
+
+```python
+class CompanionMessageRequest(BaseModel):
+    persona_id: str
+    sub_mode: str          # 'passatempo' | 'trabalho' | 'stroke'
+    model: str
+    session_id: int | None
+    work_context: str | None   # sub-modo trabalho: código/contexto
+    research_topic: str | None # pesquisa pontual
+    research_mode: bool        # True → Tavily + síntese
+    language: str
+```
+
+**Sub-modos:**
+
+| sub_mode | interval | max_tokens | temp | modelo | comportamento |
+|---|---|---|---|---|---|
+| passatempo | 20s | 150 | 0.9 | gemma-26b | Pesquisa Tavily com tema casual aleatório; relata como se estivesse a navegar |
+| trabalho | 60s | 150 | 0.9 | gemma-26b | Comenta código colado pelo utilizador; faz perguntas e sugere melhorias |
+| stroke | 10s | 60 | 1.1 | gemma-lite | Sabe que o utilizador está a masturbar-se; alterna ordens, gemidos, cenas explícitas |
+
+**Fluxo passatempo:**
+```
+hook (20s) → POST /api/companion/message { research_mode: true }
+    → backend escolhe tema aleatório (12 temas casual/viral)
+    → web_search(tema) → Tavily
+    → _call_once(synth_prompt) → "olha, haha, imagina…"
+    → log_turn() → SQLite
+    → { message, research_done: true }
+    → injectCompanionMessage() → chat sem chamar /api/chat
+```
+
+**Topics rotativos (passatempo):** twitter viral funny, weird news, interesting facts, funny animals, scientific discoveries, reddit wholesome, world records, food facts, space discoveries, internet moments, unexplained phenomena, celebrity awkward moments.
+
+**Hook frontend (`useCompanionEngine.js`):**
+- `setInterval` por sub-modo com cleanup automático
+- `busyRef` previne race conditions (não dispara novo request se anterior ainda em curso)
+- Para passatempo: sempre `research_mode: true`, sem `research_topic` (backend escolhe)
+- `companionResearch(topic)` — pesquisa pontual com topic explícito
+
+**UI:**
+- Toggle "Companion" em `ContactProfile` (abaixo do Roleplay, azul)
+- Sub-modo selector inline (3 botões: azul/verde/rosa)
+- Indicador no rodapé do chat: `● COMPANION · STROKE` com ponto pulsante
+- Textarea monospace (só sub-modo trabalho) para colar código
 
 ---
 
