@@ -277,8 +277,8 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
                     })
                     enqueueTTS(trimmed, msgIdx)
 
-                    // adiciona bolha vazia (typing indicator)
-                    setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true }])
+                    // adiciona bolha vazia (typing indicator) — preserva o timestamp da mensagem
+                    setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true, timestamp: now }])
 
                     // inicia pausa — próximo parágrafo só aparece depois
                     inDelay = true
