@@ -196,6 +196,7 @@ export default function MindGraph3D({ persona, learnedTopics, topicEdges, select
   const fgRef      = useRef()
   const rotRef     = useRef(null)
   const isDragging = useRef(false)
+  const isHovering = useRef(false)
   const angleRef   = useRef(0)
 
   const graphData = useMemo(
@@ -280,8 +281,8 @@ export default function MindGraph3D({ persona, learnedTopics, topicEdges, select
     const R_DEFAULT = 240
 
     function tick() {
-      if (fgRef.current && !isDragging.current) {
-        angleRef.current += 0.003
+      if (fgRef.current && !isDragging.current && !isHovering.current) {
+        angleRef.current += 0.0007
         const cam = fgRef.current.camera()
         if (cam) {
           // distância horizontal actual (preserva o zoom feito pelo utilizador via scroll)
@@ -338,6 +339,7 @@ export default function MindGraph3D({ persona, learnedTopics, topicEdges, select
         linkOpacity={0.4}
         linkDirectionalParticles={0}
         onNodeClick={handleNodeClick}
+        onNodeHover={node => { isHovering.current = !!node }}
         onBackgroundClick={() => onSelectNode?.(null)}
         enableNodeDrag
         enableNavigationControls
