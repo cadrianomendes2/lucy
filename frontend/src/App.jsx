@@ -966,11 +966,6 @@ function ContactProfile({ persona, pro, onTogglePro, onStartChat, onBack, stats 
           }
         </div>
 
-        {/* Modelo */}
-        <div style={{ fontSize: 12, padding: '4px 12px', borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-          {persona.defaults?.model || 'modelo padrão'}
-        </div>
-
         {/* Stats */}
         <div style={{ display: 'flex', gap: 16, marginTop: 4 }}>
           {[
@@ -985,48 +980,40 @@ function ContactProfile({ persona, pro, onTogglePro, onStartChat, onBack, stats 
           ))}
         </div>
 
-        {/* Botão Ver conversas */}
+        {/* Botão Ver conversas — discreto, outlined */}
         <button
           onClick={onStartChat}
           style={{
-            width: '100%', padding: '10px 0', borderRadius: 10, border: 'none',
-            background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13,
-            cursor: 'pointer', marginTop: 4,
+            width: '100%', padding: '9px 0', borderRadius: 10,
+            border: '1px solid var(--border)',
+            background: 'none', color: 'var(--text)', fontWeight: 500, fontSize: 13,
+            cursor: 'pointer', marginTop: 4, transition: 'background 0.12s',
           }}
         >
           Ver conversas
         </button>
 
-        {/* PRO toggle premium */}
+        {/* PRO toggle — simples: "PRO" + switch */}
         {hasPro && (
           <button
             onClick={onTogglePro}
             style={{
-              width: '100%', padding: '11px 16px', borderRadius: 12, cursor: 'pointer',
-              border: `1.5px solid ${showPro ? '#c9930a' : 'var(--border)'}`,
-              background: showPro
-                ? 'linear-gradient(135deg, #2a1f00 0%, #1a1300 100%)'
-                : 'var(--surface2)',
+              width: '100%', padding: '9px 14px', borderRadius: 10, cursor: 'pointer',
+              border: `1px solid ${showPro ? '#c9930a' : 'var(--border)'}`,
+              background: showPro ? 'rgba(245,158,11,0.06)' : 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              transition: 'all 0.25s',
-              boxShadow: showPro ? '0 0 16px rgba(212,160,10,0.18)' : 'none',
+              transition: 'all 0.2s',
             }}
           >
-            <span style={{
-              fontWeight: 800, fontSize: 12, letterSpacing: '0.1em',
-              background: showPro ? 'linear-gradient(90deg, #fcd34d, #f59e0b, #d97706)' : 'none',
-              WebkitBackgroundClip: showPro ? 'text' : 'unset',
-              WebkitTextFillColor: showPro ? 'transparent' : 'var(--text-muted)',
-              color: showPro ? 'transparent' : 'var(--text-muted)',
-            }}>
-              {showPro ? 'PRO · aba privada' : 'Modo PRO'}
+            <span style={{ fontWeight: 800, fontSize: 12, letterSpacing: '0.12em', color: showPro ? '#d97706' : 'var(--text-muted)' }}>
+              PRO
             </span>
             {/* Toggle switch */}
             <div style={{
-              width: 38, height: 22, borderRadius: 11,
+              width: 36, height: 20, borderRadius: 10,
               background: showPro ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'var(--border)',
-              position: 'relative', transition: 'background 0.25s', flexShrink: 0,
-              boxShadow: showPro ? '0 0 8px rgba(245,158,11,0.5)' : 'none',
+              position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+              boxShadow: showPro ? '0 0 6px rgba(245,158,11,0.4)' : 'none',
             }}>
               <div style={{
                 position: 'absolute', top: 3, left: showPro ? 19 : 3,
@@ -1474,8 +1461,8 @@ function ChatPage({
         {/* Direita: voz + modelo + Pro */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
 
-          {/* Roleplay — sempre visível, visual dourado premium */}
-          {(
+          {/* Roleplay — só em Pro */}
+          {pro && (
             <button
               onClick={() => setRoleplayMode(v => !v)}
               title="Modo Roleplay"

@@ -495,7 +495,7 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
         />
       )}
       {/* ── Painel Roleplay ── */}
-      {roleplayMode && (
+      {roleplayMode && pro && (
         <div style={{
           padding: '12px 16px 10px',
           borderTop: '2px solid #d4a01033',
