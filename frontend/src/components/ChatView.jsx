@@ -66,6 +66,7 @@ function buildHistory(msgs) {
 export default function ChatView({ model, thinkingMode, language, voiceUuid, onAnimation, sessionId, onSessionCreated, pro, personaId, personaEnabled = true, personaName, roleplayMode, onRoleplayClose }) {
   const [messages, setMessages] = useState([])
   const [scenario, setScenario] = useState('')
+  const [rpMode, setRpMode] = useState(null) // 'aventura' | 'desafio' | 'diversao'
   const [improving, setImproving] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -502,10 +503,35 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
           background: 'var(--surface)',
           flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <span style={{ fontSize: 10, fontWeight: 800, color: '#d4a010', letterSpacing: '0.08em' }}>ROLEPLAY</span>
             <button onClick={onRoleplayClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
           </div>
+
+          {/* Modos */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            {[
+              { key: 'aventura', label: 'Aventura', desc: 'Passa tempo divertido',  color: '#0ea5e9', template: 'Cria uma aventura divertida e envolvente. Pode ser fantasia, mistério, viagem — algo que traga diversão e entretenimento. Entra em personagem e puxa a história com energia.' },
+              { key: 'desafio',  label: 'Desafio',  desc: 'Conhecer e conquistar', color: '#f97316', template: 'Estamos num cenário de conquista e sedução. O objetivo é criar tensão, flerte e aproximação. Joga com o charme, a conversa e os olhares. Deixa a situação fluir naturalmente para algo mais intenso.' },
+              { key: 'diversao', label: 'Diversão', desc: 'Erotismo e sedução',    color: '#ec4899', template: 'Cenário sensual e erótico. A atmosfera é de desejo, sedução e prazer. Joga com a tensão, as palavras, o toque e a entrega. Sem filtros, deixa a fantasia tomar conta.' },
+            ].map(m => (
+              <button
+                key={m.key}
+                onClick={() => { setRpMode(m.key); setScenario(m.template) }}
+                style={{
+                  flex: 1, padding: '7px 4px', borderRadius: 9, cursor: 'pointer',
+                  border: `1.5px solid ${rpMode === m.key ? m.color : m.color + '33'}`,
+                  background: rpMode === m.key ? m.color + '18' : 'none',
+                  color: rpMode === m.key ? m.color : 'var(--text-muted)',
+                  textAlign: 'center', transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700 }}>{m.label}</div>
+                <div style={{ fontSize: 9, opacity: 0.75, marginTop: 1 }}>{m.desc}</div>
+              </button>
+            ))}
+          </div>
+
           <textarea
             value={scenario}
             onChange={e => setScenario(e.target.value)}
