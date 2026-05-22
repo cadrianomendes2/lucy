@@ -912,7 +912,7 @@ function PersonaContactList({ personas, selectedId, onSelect, pro }) {
 
 // ── Perfil de contacto (aparece ao clicar num contacto no chat) ───────────────
 
-function ContactProfile({ persona, pro, onTogglePro, onStartChat, onBack, stats }) {
+function ContactProfile({ persona, pro, onTogglePro, roleplayMode, onToggleRoleplay, onStartChat, onBack, stats }) {
   const hasPro = persona.id === 'lucy' || persona.id === 'glados' // personas com modo Pro
   const showPro = hasPro && pro
   const gold = 'linear-gradient(135deg, #f59e0b, #d97706, #fbbf24)'
@@ -1025,6 +1025,37 @@ function ContactProfile({ persona, pro, onTogglePro, onStartChat, onBack, stats 
           </button>
         )}
 
+        {/* Roleplay toggle — abaixo do PRO, só se PRO activo */}
+        {pro && (
+          <button
+            onClick={onToggleRoleplay}
+            style={{
+              width: '100%', padding: '9px 14px', borderRadius: 10, cursor: 'pointer',
+              border: `1px solid ${roleplayMode ? '#c9930a' : '#b8860b44'}`,
+              background: roleplayMode ? 'rgba(245,158,11,0.06)' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: '0.08em', color: roleplayMode ? '#d97706' : 'var(--text-muted)' }}>
+              Roleplay
+            </span>
+            <div style={{
+              width: 36, height: 20, borderRadius: 10,
+              background: roleplayMode ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'var(--border)',
+              position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+              boxShadow: roleplayMode ? '0 0 6px rgba(245,158,11,0.4)' : 'none',
+            }}>
+              <div style={{
+                position: 'absolute', top: 2, left: roleplayMode ? 18 : 2,
+                width: 16, height: 16, borderRadius: '50%',
+                background: '#fff', transition: 'left 0.2s',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </div>
+          </button>
+        )}
+
       </div>
     </div>
   )
@@ -1087,7 +1118,7 @@ function SessionHistoryPanel({ onSelect, onBack, personaId, isPro }) {
 
 // ── Sidebar de contactos do chat ─────────────────────────────────────────────
 
-function ChatContactsSidebar({ personas, activePersona, pro, onTogglePro, onSelectSession, onSelectPersona }) {
+function ChatContactsSidebar({ personas, activePersona, pro, onTogglePro, roleplayMode, onToggleRoleplay, onSelectSession, onSelectPersona }) {
   const [view, setView] = useState('contacts') // 'contacts' | 'profile' | 'history'
   const [viewing, setViewing] = useState(null)
   const [stats, setStats] = useState({ memorias: 0, interesses: 0, sessoes: 0 })
@@ -1175,6 +1206,8 @@ function ChatContactsSidebar({ personas, activePersona, pro, onTogglePro, onSele
         persona={viewing}
         pro={pro}
         onTogglePro={onTogglePro}
+        roleplayMode={roleplayMode}
+        onToggleRoleplay={onToggleRoleplay}
         onStartChat={() => { onSelectPersona?.(viewing); setView('history') }}
         onBack={() => setView('contacts')}
         stats={stats}
@@ -1399,9 +1432,10 @@ function ChatPage({
   rightOpen, onToggleRight,
   contactSelected,
   onClearChat,
+  roleplayMode,
+  onRoleplayClose,
 }) {
   const [availableVoices, setAvailableVoices] = useState([])
-  const [roleplayMode, setRoleplayMode] = useState(false)
 
   useEffect(() => {
     fetch('/api/voices').then(r => r.json()).then(d => setAvailableVoices(Array.isArray(d) ? d : [])).catch(() => {})
@@ -1460,26 +1494,6 @@ function ChatPage({
 
         {/* Direita: voz + modelo + Pro */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-
-          {/* Roleplay — só em Pro */}
-          {pro && (
-            <button
-              onClick={() => setRoleplayMode(v => !v)}
-              title="Modo Roleplay"
-              style={{
-                height: 32, padding: '0 12px', borderRadius: 8, fontSize: 11, fontWeight: 800,
-                letterSpacing: '0.06em', cursor: 'pointer', transition: 'all 0.15s',
-                border: `1.5px solid ${roleplayMode ? '#c9930a' : '#b8860b44'}`,
-                background: roleplayMode
-                  ? 'linear-gradient(135deg, #f59e0b, #d97706)'
-                  : 'rgba(212,160,10,0.07)',
-                color: roleplayMode ? '#fff' : '#d4a010',
-                boxShadow: roleplayMode ? '0 2px 10px rgba(245,158,11,0.4)' : 'none',
-              }}
-            >
-              Roleplay
-            </button>
-          )}
 
           {/* Toggle voz — minimalista */}
           <button
@@ -1560,7 +1574,7 @@ function ChatPage({
           personaEnabled={persona?.enabled !== false}
           personaName={persona?.name}
           roleplayMode={roleplayMode}
-          onRoleplayClose={() => setRoleplayMode(false)}
+          onRoleplayClose={onRoleplayClose}
         />
       ) : (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, color: 'var(--text-muted)', background: 'var(--surface2)' }}>
@@ -2873,6 +2887,7 @@ export default function App() {
   const [thinkingMode, setThinkingMode] = useState('off')
   const [language, setLanguage] = useState('pt')
   const [voiceUuid, setVoiceUuid] = useState(null) // null = desligado; restaurado após seleccionar persona
+  const [roleplayMode, setRoleplayMode] = useState(false)
   const [persona, setPersona] = useState({ name: 'Lucy', avatar_url: '' })
   const [sessionId, setSessionId] = useState(null)
   const [chatKey, setChatKey] = useState(0)
@@ -3131,9 +3146,11 @@ export default function App() {
             activePersona={persona}
             pro={pro}
             onTogglePro={() => {
-              if (pro) { setPro(false); setSessionId(null); setChatKey(k => k + 1) }
+              if (pro) { setPro(false); setSessionId(null); setChatKey(k => k + 1); setRoleplayMode(false) }
               else showPinFor(() => { setPro(true); setSessionId(null); setChatKey(k => k + 1) })
             }}
+            roleplayMode={roleplayMode}
+            onToggleRoleplay={() => setRoleplayMode(v => !v)}
             onSelectSession={id => { setSessionId(id); }}
             onSelectPersona={handleSelectPersona}
           />
@@ -3174,6 +3191,8 @@ export default function App() {
             onToggleRight={() => setRightOpen(v => !v)}
             contactSelected={contactSelected}
             onClearChat={() => { setSessionId(null); setChatKey(k => k + 1) }}
+            roleplayMode={roleplayMode}
+            onRoleplayClose={() => setRoleplayMode(false)}
           />
         )}
 
