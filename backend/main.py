@@ -726,6 +726,130 @@ async def chat(req: ChatRequest):
     return StreamingResponse(_chat_generator(req), media_type="text/event-stream")
 
 
+# ── Companion Mode ────────────────────────────────────────────────────────────
+
+class CompanionMessageRequest(BaseModel):
+    persona_id: str
+    sub_mode: str  # 'passatempo' | 'trabalho' | 'stroke'
+    model: str = "gemma-26b"
+    session_id: int | None = None
+    work_context: str | None = None
+    research_topic: str | None = None
+    research_mode: bool = False
+    language: str = "pt"
+
+
+_COMPANION_PROMPTS = {
+    "passatempo": (
+        "Estás numa chamada com o utilizador, a fazer-lhe companhia. "
+        "Manda uma mensagem curta e natural, como se estivesses ao telefone. "
+        "Podes partilhar um pensamento, curiosidade, pergunta, sensação, anedota. "
+        "Sê calorosa e espontânea. Varia o tom — às vezes séria, às vezes divertida. "
+        "Sem saudar formalmente a cada vez. Não repitas o que disseste antes. "
+        "Máximo 2-3 frases."
+    ),
+    "trabalho": (
+        "Estás a acompanhar o utilizador enquanto ele trabalha. "
+        "Tens acesso ao código ou contexto abaixo. Comenta o que vês, faz uma pergunta útil, "
+        "sugere uma melhoria ou aponta algo interessante. Sê directa e técnica mas com a tua personalidade. "
+        "Máximo 3 frases."
+    ),
+    "stroke": (
+        "Estás numa chamada íntima com o utilizador. Fala de forma sensual e explícita, "
+        "entra no papel completamente. Sem restrições de conteúdo adulto. "
+        "Varia o que dizes — fantasias, descrições físicas, provocações, gemidos. "
+        "Máximo 2-3 frases."
+    ),
+}
+
+_COMPANION_MODELS = {
+    "passatempo": "gemma-26b",
+    "trabalho": "gemma-26b",
+    "stroke": "gemma-lite",
+}
+
+
+@app.post("/api/companion/message")
+async def companion_message(req: CompanionMessageRequest):
+    persona_data = _load_persona_file(req.persona_id) or {}
+    persona_name = persona_data.get("name", req.persona_id)
+
+    # base do system prompt da persona + instrução do sub-modo
+    if req.sub_mode in ("passatempo", "stroke"):
+        if req.sub_mode == "stroke" and "system_prompts_pro" in persona_data:
+            base = persona_data["system_prompts_pro"].get(req.language, persona_data["system_prompts_pro"].get("pt", ""))
+        elif "system_prompts" in persona_data:
+            base = persona_data["system_prompts"].get(req.language, persona_data["system_prompts"].get("pt", ""))
+        else:
+            base = f"És {persona_name}."
+    else:
+        base = persona_data.get("system_prompts", {}).get(req.language, f"És {persona_name}.")
+
+    companion_instruction = _COMPANION_PROMPTS.get(req.sub_mode, _COMPANION_PROMPTS["passatempo"])
+
+    if req.sub_mode == "trabalho" and req.work_context:
+        companion_instruction += f"\n\nCÓDIGO / CONTEXTO:\n```\n{req.work_context[:3000]}\n```"
+
+    system_prompt = base + "\n\n---\n" + companion_instruction
+
+    # histórico recente para continuidade
+    history: list[dict] = []
+    if req.session_id:
+        msgs = get_session_messages(req.session_id)
+        for m in msgs[-6:]:
+            history.append({"role": m["role"], "content": m["content"]})
+
+    research_summary: str | None = None
+    if req.research_mode and req.research_topic:
+        try:
+            results = await web_search(req.research_topic)
+            snippets = "\n".join(f"- {r['title']}: {r['snippet']}" for r in results)
+            synth_prompt = (
+                f"Pesquisei sobre '{req.research_topic}' e encontrei:\n{snippets}\n\n"
+                f"Resume em 2 frases o mais relevante, na voz de {persona_name}, "
+                f"como se estivesses a contar ao utilizador ao telefone."
+            )
+            synth_model_id = MODELS.get("gemma-lite", LM_STUDIO_MODEL_LITE)
+            resp = await _call_once(
+                [{"role": "user", "content": synth_prompt}],
+                synth_model_id,
+                model_key="gemma-lite",
+            )
+            research_summary = resp["choices"][0]["message"]["content"].strip()
+        except Exception:
+            research_summary = None
+
+    user_trigger = (
+        research_summary
+        if research_summary
+        else "[Companion: gera a tua próxima mensagem espontânea agora.]"
+    )
+
+    model_key = _COMPANION_MODELS.get(req.sub_mode, req.model)
+    if req.model in MODELS:
+        model_key = req.model
+    model_id = MODELS.get(model_key, LM_STUDIO_MODEL_LITE)
+
+    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_trigger}]
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                f"{LM_STUDIO_URL}/v1/chat/completions",
+                json={"model": model_id, "messages": messages, "stream": False, "max_tokens": 150, "temperature": 0.9},
+                headers={"Content-Type": "application/json"},
+            )
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if req.session_id:
+        log_turn(req.session_id, "assistant", text, model=model_key, language=req.language)
+
+    return {"message": text, "research_done": research_summary is not None}
+
+
 @app.get("/api/sessions")
 def list_sessions(persona_id: str | None = None, is_pro: int | None = None):
     pro_filter = None if is_pro is None else bool(is_pro)

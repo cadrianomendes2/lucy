@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import MessageBubble from './MessageBubble.jsx'
 import MessageInput from './MessageInput.jsx'
 import ResearchStream from './ResearchStream.jsx'
+import { useCompanionEngine } from '../hooks/useCompanionEngine.js'
 
 function stripEmojis(text) {
   return text
@@ -63,7 +64,7 @@ function buildHistory(msgs) {
   return result
 }
 
-export default function ChatView({ model, thinkingMode, language, voiceUuid, onAnimation, sessionId, onSessionCreated, pro, personaId, personaEnabled = true, personaName, roleplayMode, onRoleplayClose }) {
+export default function ChatView({ model, thinkingMode, language, voiceUuid, onAnimation, sessionId, onSessionCreated, pro, personaId, personaEnabled = true, personaName, roleplayMode, onRoleplayClose, companionMode, companionSubMode, onCompanionClose, onSetCompanionSubMode, persona }) {
   const [messages, setMessages] = useState([])
   const [scenario, setScenario] = useState('')
   const [rpMode, setRpMode] = useState(null) // 'aventura' | 'desafio' | 'diversao'
@@ -73,6 +74,23 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
   const [searchingQuery, setSearchingQuery] = useState(null)
   const [researchTopic, setResearchTopic] = useState(null)
   const [researchType, setResearchType] = useState(null)
+  const [workContext, setWorkContext] = useState('')
+
+  // companion: injeta mensagem espontânea no chat
+  function injectCompanionMessage(text) {
+    setMessages(prev => [...prev, { role: 'assistant', content: text, timestamp: new Date().toISOString(), companion: true }])
+  }
+
+  useCompanionEngine({
+    active: companionMode && pro,
+    subMode: companionSubMode,
+    persona: persona || { id: personaId, name: personaName },
+    sessionId,
+    model,
+    workContext: companionSubMode === 'trabalho' ? workContext : null,
+    onMessage: injectCompanionMessage,
+  })
+
   // TTS: { msgIdx, paused, text }
   const [ttsState, setTtsState] = useState(null)
   const audioRef = useRef(null)
@@ -579,7 +597,14 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
             <button
               onClick={() => {
                 if (!scenario.trim() || loading) return
-                const msg = `Começa o roleplay com este cenário:\n\n${scenario.trim()}\n\nEntra em personagem e escreve a primeira cena.`
+                const modeInstructions = {
+                  aventura: 'Entra em personagem e começa a aventura com energia e criatividade. Sê descritiva, divertida e conduz a história com entusiasmo.',
+                  desafio:  'Entra em personagem. Joga com o flerte, a tensão e a conquista. Sê provocadora, usa o olhar e as palavras para criar atração. Deixa a situação evoluir naturalmente.',
+                  diversao: 'Entra em personagem. Sem filtros — explora o desejo, a sedução e o prazer abertamente. Sê sensual, ousada e deixa a fantasia fluir sem restrições.',
+                }
+                const instrucao = modeInstructions[rpMode] || 'Entra em personagem e escreve a primeira cena.'
+                const tag = rpMode ? `[Roleplay · ${rpMode.charAt(0).toUpperCase() + rpMode.slice(1)}]\n` : ''
+                const msg = `${tag}Cenário:\n${scenario.trim()}\n\n${instrucao}`
                 sendMessage(msg)
               }}
               disabled={!scenario.trim() || loading}
@@ -597,6 +622,72 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
               Começar
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Companion Mode indicator + painel de trabalho ── */}
+      {companionMode && pro && (
+        <div style={{
+          padding: '8px 16px 10px',
+          borderTop: `2px solid ${companionSubMode === 'stroke' ? '#ec489933' : companionSubMode === 'trabalho' ? '#10b98133' : '#3b82f633'}`,
+          background: 'var(--surface)',
+          flexShrink: 0,
+        }}>
+          {/* Header da chamada */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: companionSubMode === 'trabalho' ? 10 : 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                background: companionSubMode === 'stroke' ? '#ec4899' : companionSubMode === 'trabalho' ? '#10b981' : '#3b82f6',
+                boxShadow: `0 0 6px ${companionSubMode === 'stroke' ? '#ec4899' : companionSubMode === 'trabalho' ? '#10b981' : '#3b82f6'}`,
+                animation: 'pulse 2s infinite',
+              }} />
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', color: companionSubMode === 'stroke' ? '#ec4899' : companionSubMode === 'trabalho' ? '#10b981' : '#3b82f6' }}>
+                COMPANION · {companionSubMode === 'passatempo' ? 'PASSA TEMPO' : companionSubMode === 'trabalho' ? 'TRABALHO' : 'STROKE'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {['passatempo', 'trabalho', 'stroke'].map(sm => {
+                const colors = { passatempo: '#3b82f6', trabalho: '#10b981', stroke: '#ec4899' }
+                const labels = { passatempo: 'Tempo', trabalho: 'Trabalho', stroke: 'Stroke' }
+                return (
+                  <button
+                    key={sm}
+                    onClick={() => onSetCompanionSubMode?.(sm)}
+                    style={{
+                      padding: '2px 7px', borderRadius: 5, cursor: 'pointer', fontSize: 9, fontWeight: 700,
+                      border: `1px solid ${companionSubMode === sm ? colors[sm] : 'var(--border)'}`,
+                      background: companionSubMode === sm ? `${colors[sm]}18` : 'none',
+                      color: companionSubMode === sm ? colors[sm] : 'var(--text-muted)',
+                    }}
+                  >
+                    {labels[sm]}
+                  </button>
+                )
+              })}
+              <button
+                onClick={onCompanionClose}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
+              >✕</button>
+            </div>
+          </div>
+
+          {/* Painel de código (só sub-modo trabalho) */}
+          {companionSubMode === 'trabalho' && (
+            <textarea
+              value={workContext}
+              onChange={e => setWorkContext(e.target.value)}
+              placeholder="Cola o teu código ou contexto aqui — ela vai comentar e opinar…"
+              rows={3}
+              style={{
+                width: '100%', resize: 'vertical', minHeight: 60, maxHeight: 160,
+                background: 'var(--surface2)', color: 'var(--text)',
+                border: '1px solid #10b98133', borderRadius: 8,
+                padding: '7px 10px', fontSize: 12, lineHeight: 1.5,
+                fontFamily: 'monospace', boxSizing: 'border-box',
+              }}
+            />
+          )}
         </div>
       )}
 

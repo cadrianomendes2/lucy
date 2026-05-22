@@ -912,7 +912,7 @@ function PersonaContactList({ personas, selectedId, onSelect, pro }) {
 
 // ── Perfil de contacto (aparece ao clicar num contacto no chat) ───────────────
 
-function ContactProfile({ persona, pro, onTogglePro, roleplayMode, onToggleRoleplay, onStartChat, onBack, stats }) {
+function ContactProfile({ persona, pro, onTogglePro, roleplayMode, onToggleRoleplay, companionMode, companionSubMode, onToggleCompanion, onSetCompanionSubMode, onStartChat, onBack, stats }) {
   const hasPro = persona.id === 'lucy' || persona.id === 'glados' // personas com modo Pro
   const showPro = hasPro && pro
   const gold = 'linear-gradient(135deg, #f59e0b, #d97706, #fbbf24)'
@@ -1056,6 +1056,64 @@ function ContactProfile({ persona, pro, onTogglePro, roleplayMode, onToggleRolep
           </button>
         )}
 
+        {/* Companion toggle — abaixo do Roleplay, só se PRO activo */}
+        {pro && (
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button
+              onClick={onToggleCompanion}
+              style={{
+                width: '100%', padding: '9px 14px', borderRadius: 10, cursor: 'pointer',
+                border: `1px solid ${companionMode ? '#2563eb' : 'rgba(37,99,235,0.25)'}`,
+                background: companionMode ? 'rgba(37,99,235,0.07)' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                transition: 'all 0.2s',
+              }}
+            >
+              <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: '0.08em', color: companionMode ? '#3b82f6' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 14 }}>📞</span> Companion
+              </span>
+              <div style={{
+                width: 36, height: 20, borderRadius: 10,
+                background: companionMode ? 'linear-gradient(90deg, #3b82f6, #2563eb)' : 'var(--border)',
+                position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+                boxShadow: companionMode ? '0 0 6px rgba(59,130,246,0.4)' : 'none',
+              }}>
+                <div style={{
+                  position: 'absolute', top: 2, left: companionMode ? 18 : 2,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: '#fff', transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                }} />
+              </div>
+            </button>
+
+            {/* Sub-modo selector — só quando companion activo */}
+            {companionMode && (
+              <div style={{ display: 'flex', gap: 4, width: '100%' }}>
+                {[
+                  { key: 'passatempo', label: 'Passa tempo', color: '#3b82f6' },
+                  { key: 'trabalho',   label: 'Trabalho',    color: '#10b981' },
+                  { key: 'stroke',     label: 'Stroke',      color: '#ec4899' },
+                ].map(({ key, label, color }) => (
+                  <button
+                    key={key}
+                    onClick={() => onSetCompanionSubMode(key)}
+                    style={{
+                      flex: 1, padding: '5px 0', borderRadius: 7, cursor: 'pointer', fontSize: 10, fontWeight: 700,
+                      border: `1px solid ${companionSubMode === key ? color : 'var(--border)'}`,
+                      background: companionSubMode === key ? `${color}18` : 'none',
+                      color: companionSubMode === key ? color : 'var(--text-muted)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   )
@@ -1118,7 +1176,7 @@ function SessionHistoryPanel({ onSelect, onBack, personaId, isPro }) {
 
 // ── Sidebar de contactos do chat ─────────────────────────────────────────────
 
-function ChatContactsSidebar({ personas, activePersona, pro, onTogglePro, roleplayMode, onToggleRoleplay, onSelectSession, onSelectPersona }) {
+function ChatContactsSidebar({ personas, activePersona, pro, onTogglePro, roleplayMode, onToggleRoleplay, companionMode, companionSubMode, onToggleCompanion, onSetCompanionSubMode, onSelectSession, onSelectPersona }) {
   const [view, setView] = useState('contacts') // 'contacts' | 'profile' | 'history'
   const [viewing, setViewing] = useState(null)
   const [stats, setStats] = useState({ memorias: 0, interesses: 0, sessoes: 0 })
@@ -1208,6 +1266,10 @@ function ChatContactsSidebar({ personas, activePersona, pro, onTogglePro, rolepl
         onTogglePro={onTogglePro}
         roleplayMode={roleplayMode}
         onToggleRoleplay={onToggleRoleplay}
+        companionMode={companionMode}
+        companionSubMode={companionSubMode}
+        onToggleCompanion={onToggleCompanion}
+        onSetCompanionSubMode={onSetCompanionSubMode}
         onStartChat={() => { onSelectPersona?.(viewing); setView('history') }}
         onBack={() => setView('contacts')}
         stats={stats}
@@ -1434,6 +1496,10 @@ function ChatPage({
   onClearChat,
   roleplayMode,
   onRoleplayClose,
+  companionMode,
+  companionSubMode,
+  onCompanionClose,
+  onSetCompanionSubMode,
 }) {
   const [availableVoices, setAvailableVoices] = useState([])
 
@@ -1575,6 +1641,11 @@ function ChatPage({
           personaName={persona?.name}
           roleplayMode={roleplayMode}
           onRoleplayClose={onRoleplayClose}
+          companionMode={companionMode}
+          companionSubMode={companionSubMode}
+          onCompanionClose={onCompanionClose}
+          onSetCompanionSubMode={onSetCompanionSubMode}
+          persona={persona}
         />
       ) : (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, color: 'var(--text-muted)', background: 'var(--surface2)' }}>
@@ -2888,6 +2959,8 @@ export default function App() {
   const [language, setLanguage] = useState('pt')
   const [voiceUuid, setVoiceUuid] = useState(null) // null = desligado; restaurado após seleccionar persona
   const [roleplayMode, setRoleplayMode] = useState(false)
+  const [companionMode, setCompanionMode] = useState(false)
+  const [companionSubMode, setCompanionSubMode] = useState('passatempo')
   const [persona, setPersona] = useState({ name: 'Lucy', avatar_url: '' })
   const [sessionId, setSessionId] = useState(null)
   const [chatKey, setChatKey] = useState(0)
@@ -3146,11 +3219,15 @@ export default function App() {
             activePersona={persona}
             pro={pro}
             onTogglePro={() => {
-              if (pro) { setPro(false); setSessionId(null); setChatKey(k => k + 1); setRoleplayMode(false) }
+              if (pro) { setPro(false); setSessionId(null); setChatKey(k => k + 1); setRoleplayMode(false); setCompanionMode(false); setCompanionSubMode('passatempo') }
               else showPinFor(() => { setPro(true); setSessionId(null); setChatKey(k => k + 1) })
             }}
             roleplayMode={roleplayMode}
             onToggleRoleplay={() => setRoleplayMode(v => !v)}
+            companionMode={companionMode}
+            companionSubMode={companionSubMode}
+            onToggleCompanion={() => setCompanionMode(v => !v)}
+            onSetCompanionSubMode={setCompanionSubMode}
             onSelectSession={id => { setSessionId(id); }}
             onSelectPersona={handleSelectPersona}
           />
@@ -3193,6 +3270,10 @@ export default function App() {
             onClearChat={() => { setSessionId(null); setChatKey(k => k + 1) }}
             roleplayMode={roleplayMode}
             onRoleplayClose={() => setRoleplayMode(false)}
+            companionMode={companionMode}
+            companionSubMode={companionSubMode}
+            onCompanionClose={() => { setCompanionMode(false); setCompanionSubMode('passatempo') }}
+            onSetCompanionSubMode={setCompanionSubMode}
           />
         )}
 
