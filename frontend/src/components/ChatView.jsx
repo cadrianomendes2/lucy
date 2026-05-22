@@ -83,7 +83,19 @@ export default function ChatView({ model, thinkingMode, language, voiceUuid, onA
     }
     fetch(`/api/sessions/${sessionId}/messages`)
       .then(r => r.json())
-      .then(msgs => setMessages(msgs.map(m => ({ role: m.role, content: m.content }))))
+      .then(msgs => {
+        const expanded = []
+        for (const m of msgs) {
+          if (m.role === 'assistant' && m.content.includes('\n\n')) {
+            m.content.split('\n\n').filter(p => p.trim()).forEach(p =>
+              expanded.push({ role: m.role, content: p.trim() })
+            )
+          } else {
+            expanded.push({ role: m.role, content: m.content })
+          }
+        }
+        setMessages(expanded)
+      })
       .catch(() => {})
   }, [sessionId])
 
