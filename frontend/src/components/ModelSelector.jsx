@@ -1,22 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 
-// Modelos agrupados por categoria
+// Só modelos de chat — reasoning é controlado pelo toggle Off/Fast/Med/Max
 const MODEL_GROUPS = [
-  {
-    models: [
-      { key: 'qwen-9b',     label: 'Qwen3.5 9B',   sub: '9B · Reasoning' },
-      { key: 'qwen-27b',    label: 'Qwen3.5 27B',  sub: '27B · Reasoning' },
-      { key: 'qwen-40b',    label: 'Qwen3.6 40B',  sub: '40B · Reasoning' },
-    ],
-  },
   {
     models: [
       { key: 'gemma-lite',  label: 'Gemma E4B',    sub: '7.5B · Fast' },
       { key: 'gemma-26b',   label: 'Gemma 26B',    sub: '26B' },
-    ],
-  },
-  {
-    models: [
       { key: 'nemo-12b',    label: 'Nemo Roleplay', sub: '12B · PT' },
     ],
   },

@@ -300,6 +300,7 @@ function ProfilePage() {
   const [loadedModels, setLoadedModels] = useState([])
   const [modelOps, setModelOps] = useState({})   // { alias: 'loading' | 'unloading' }
   const [sysStats, setSysStats] = useState(null)
+  const [tavilyUsage, setTavilyUsage] = useState(null)
   const [playingVoice, setPlayingVoice] = useState(null)
   const photoInputRef = useRef(null)
   const statsIntervalRef = useRef(null)
@@ -337,6 +338,7 @@ function ProfilePage() {
     fetch('/api/reasoning-models/init', { method: 'POST' }).catch(() => {})
     // refresca o avatar quando volta a este painel
     setPhotoTs(Date.now())
+    fetch('/api/tavily/usage').then(r => r.json()).then(setTavilyUsage).catch(() => {})
     const fetchStats = () => fetch('/api/system/stats').then(r => r.json()).then(setSysStats).catch(() => {})
     fetchStats()
     statsIntervalRef.current = setInterval(fetchStats, 3000)
@@ -740,6 +742,30 @@ function ProfilePage() {
                   + Adicionar voz (em breve)
                 </button>
               </div>
+
+              {/* ── Web Search (Tavily) ── */}
+              {tavilyUsage?.has_key && (
+                <div style={{ padding: '10px 16px 12px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Web Search · Tavily</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-soft)' }}>Pesquisas {tavilyUsage.month}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: tavilyUsage.searches_this_month > 800 ? '#ef4444' : tavilyUsage.searches_this_month > 500 ? '#f59e0b' : 'var(--accent)' }}>
+                      {tavilyUsage.searches_this_month} / {tavilyUsage.limit}
+                    </span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${Math.min(100, (tavilyUsage.searches_this_month / tavilyUsage.limit) * 100)}%`,
+                      background: tavilyUsage.searches_this_month > 800 ? '#ef4444' : tavilyUsage.searches_this_month > 500 ? '#f59e0b' : 'var(--accent)',
+                      borderRadius: 3, transition: 'width 0.5s',
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {tavilyUsage.remaining} restantes · contagem local (aprox.)
+                  </div>
+                </div>
+              )}
 
               {/* ── Memória ── */}
               <div style={{ padding: '12px 16px 8px' }}>

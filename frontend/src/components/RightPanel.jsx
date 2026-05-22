@@ -65,7 +65,8 @@ export default function RightPanel({ open, onClose, personaName = 'Lucy', person
 
   if (!open) return null
 
-  const interestKeys = interests.map(i => i.interest || i).filter(Boolean)
+  // top 6 interesses dinâmicos por número de factos (API já devolve ordenado)
+  const interestKeys = interests.map(i => i.interest || i).filter(Boolean).slice(0, 6)
 
   // ── Expanded views ────────────────────────────────────────────────────────
 

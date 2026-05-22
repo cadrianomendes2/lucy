@@ -1578,6 +1578,32 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/tavily/usage")
+def tavily_usage():
+    """Conta pesquisas Tavily feitas este mês via learner_log."""
+    from datetime import datetime, timezone
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(os.path.expanduser("~/.personal-ai/memory.db"))
+    now = datetime.now(timezone.utc)
+    month_start = now.strftime("%Y-%m-01")
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM learner_log WHERE timestamp >= ?", (month_start,)
+        ).fetchone()[0]
+    except Exception:
+        count = 0
+    finally:
+        conn.close()
+    tavily_key = os.getenv("TAVILY_API_KEY", "")
+    return {
+        "searches_this_month": count,
+        "limit": 1000,
+        "remaining": max(0, 1000 - count),
+        "has_key": bool(tavily_key),
+        "month": now.strftime("%B %Y"),
+    }
+
+
 # ── Roleplay ──────────────────────────────────────────────────────────────────
 
 class RoleplayImproveRequest(BaseModel):
